@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
 parser.add_argument("--epochs", default=10, type=int, help="Number of epochs.")
 parser.add_argument("--hidden_layers", default="200", type=str, help="Hidden layer configuration.")
-parser.add_argument("--models", default=3, type=int, help="Number of models.")
+parser.add_argument("--models", default=7, type=int, help="Number of models.")
 parser.add_argument("--recodex", default=False, action="store_true", help="Evaluation in ReCodEx.")
 parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
 args = parser.parse_args()
@@ -77,10 +77,10 @@ with open("mnist_ensemble.out", "w") as out_file:
         #    manually or use tf.keras.metrics.SparseCategoricalAccuracy.
         predictions.append(model.predict(mnist.test.data["images"]))
 
-        print(np.array(predictions).shape)
         ensamble_prediction = np.mean(np.array(predictions), axis=0)
-        print(ensamble_prediction.shape)
-        ensemble_accuracy = tf.metrics.sparseCategoricalAccuracy().update_state(mnist.test.data["labels"], ensamble_prediction).result().numpy()
+        accuracy_node = tf.metrics.SparseCategoricalAccuracy()
+        accuracy_node.update_state(mnist.test.data["labels"], ensamble_prediction);
+        ensemble_accuracy = accuracy_node.result().numpy()
 
         # Print the results.
         print("{:.2f} {:.2f}".format(100 * individual_accuracy, 100 * ensemble_accuracy), file=out_file)
