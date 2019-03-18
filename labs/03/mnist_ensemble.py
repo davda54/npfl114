@@ -56,7 +56,7 @@ with open("mnist_ensemble.out", "w") as out_file:
     for model in models:
         # TODO: Compute the accuracy on the dev set for
         # the individual `models[model]`.
-        test_logs = model.evaluate(mnist.test.data["images"], mnist.test.data["labels"], batch_size=args.batch_size)
+        test_logs = model.evaluate(mnist.dev.data["images"], mnist.dev.data["labels"], batch_size=args.batch_size)
         individual_accuracy = test_logs[model.metrics_names.index("individual_accuracy")]
 
         # TODO: Compute the accuracy on the dev set for
@@ -75,11 +75,11 @@ with open("mnist_ensemble.out", "w") as out_file:
         #    and instead call `model.predict` on individual models and
         #    average the results. To measure accuracy, either do it completely
         #    manually or use tf.keras.metrics.SparseCategoricalAccuracy.
-        predictions.append(model.predict(mnist.test.data["images"]))
+        predictions.append(model.predict(mnist.dev.data["images"]))
 
         ensamble_prediction = np.mean(np.array(predictions), axis=0)
         accuracy_node = tf.metrics.SparseCategoricalAccuracy()
-        accuracy_node.update_state(mnist.test.data["labels"], ensamble_prediction);
+        accuracy_node.update_state(mnist.dev.data["labels"], ensamble_prediction);
         ensemble_accuracy = accuracy_node.result().numpy()
 
         # Print the results.
