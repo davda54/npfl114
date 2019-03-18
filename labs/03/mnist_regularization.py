@@ -22,9 +22,6 @@ parser.add_argument("--threads", default=1, type=int, help="Maximum number of th
 args = parser.parse_args()
 args.hidden_layers = [int(hidden_layer) for hidden_layer in args.hidden_layers.split(",") if hidden_layer]
 
-def sparse_to_distribution(labels):
-    return np.eye(mnist.LABELS)[labels]
-
 # Fix random seeds
 np.random.seed(42)
 tf.random.set_seed(42)
@@ -49,10 +46,10 @@ mnist = MNIST()
 # because of a bug if `args.l2` is zero, use `None` instead of `L1L2` regularizer
 # with zero l2.
 
-if args.l2 is not None and args.l2 != 0:
-    regularizer = tf.keras.regularizers.L1L2(l2=args.l2)
-else:
-    regularizer = None
+def get_regularizer():
+    if args.l2 is not None and args.l2 != 0:
+        return tf.keras.regularizers.L1L2(l2=args.l2)
+    return None
 
 # TODO: Implement dropout.
 # Add a `tf.keras.layers.Dropout` with `args.dropout` rate after the Flatten
@@ -63,9 +60,9 @@ model = tf.keras.Sequential()
 model.add(tf.keras.layers.Flatten(input_shape=[MNIST.H, MNIST.W, MNIST.C]))
 model.add(tf.keras.layers.Dropout(args.dropout))
 for hidden_layer in args.hidden_layers:
-    model.add(tf.keras.layers.Dense(hidden_layer, activation=tf.nn.relu, kernel_regularizer=regularizer, bias_regularizer=regularizer))
+    model.add(tf.keras.layers.Dense(hidden_layer, activation=tf.nn.relu, kernel_regularizer=get_regularizer(), bias_regularizer=get_regularizer()))
     model.add(tf.keras.layers.Dropout(args.dropout))
-model.add(tf.keras.layers.Dense(MNIST.LABELS, kernel_regularizer=regularizer, bias_regularizer=regularizer))
+model.add(tf.keras.layers.Dense(MNIST.LABELS, kernel_regularizer=get_regularizer(), bias_regularizer=get_regularizer()))
 
 # TODO: Implement label smoothing.
 # Apply the given smoothing. You will need to change the
@@ -75,6 +72,9 @@ model.add(tf.keras.layers.Dense(MNIST.LABELS, kernel_regularizer=regularizer, bi
 # (i.e., mnist.{train,dev,test}.data["labels"]) from indices of the gold class
 # to a full categorical distribution (you can use either NumPy or there is
 # a helper method also in the Keras API).
+
+def sparse_to_distribution(labels):
+    return np.eye(mnist.LABELS)[labels]
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(),
