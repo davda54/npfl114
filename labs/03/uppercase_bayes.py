@@ -60,14 +60,14 @@ def metric(label_smoothing):
 
 
 # Black-box function to be optimized by Mr. Bayes
-def model_accuracy(alphabet_size, dropout, embedding_size, layer_size, label_smoothing, learning_rate, learning_rate_final, window):
+def model_accuracy(alphabet_size, dropout, embedding_size, label_smoothing, layer_size, learning_rate, learning_rate_final, window):
 
     # Scale the parameters correctly
     alphabet_size = int(alphabet_size + 0.5)
     embedding_size = min(alphabet_size, int(embedding_size + 0.5))
     layer_size = int(layer_size + 0.5)
     learning_rate = 10 ** learning_rate
-    learning_rate_final = max(learning_rate, 10 ** learning_rate_final)
+    learning_rate_final = min(learning_rate, 10 ** learning_rate_final)
     window = int(window + 0.5)
 
     # Load data
@@ -114,7 +114,7 @@ def model_accuracy(alphabet_size, dropout, embedding_size, layer_size, label_smo
         "l_r={:.6f}".format(learning_rate),
         "l_r_f={:.8f}".format(learning_rate_final),
         "w={}".format(window),
-        "act=relu"
+        "act={}".format(args.activation)
     ))
     model.save(filename, include_optimizer=False)
 
@@ -125,8 +125,8 @@ pbounds = {
     'alphabet_size': (64.0, 128.0),
     'dropout': (0.3, 0.5),
     'embedding_size': (16.0, 64.0),
-    'layer_size': (512.0, 1024.0),
     'label_smoothing': (0.0, 0.2),
+    'layer_size': (512.0, 1024.0),
     'learning_rate': (-4.0, -1.5),
     'learning_rate_final': (-5.0, -3),
     'window': (4.5, 8.0)
@@ -136,9 +136,11 @@ optimizer = BayesianOptimization(
     f=model_accuracy,
     pbounds=pbounds,
     verbose=2,
-    random_state=1,
+    random_state=1
 )
-load_logs(optimizer, logs=["./parameters_log.json"])
+if os.path.isfile("./parameters_log.json"):
+    load_logs(optimizer, logs=["./parameters_log.json"])
+    print("Loaded {} model evaluations".format(len(optimizer.space)))
 
 logger = JSONLogger(path="./parameters_log_new.json")
 optimizer.subscribe(Events.OPTMIZATION_STEP, logger)

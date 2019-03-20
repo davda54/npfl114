@@ -12,21 +12,21 @@ from uppercase_data import UppercaseData
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--activation", default="elu", type=str, help="Activation function.")
-parser.add_argument("--alphabet_size", default=100, type=int, help="If nonzero, limit alphabet to this many most frequent chars.") #
+parser.add_argument("--alphabet_size", default=100, type=int, help="If nonzero, limit alphabet to this many most frequent chars.")
 parser.add_argument("--batch_size", default=1024, type=int, help="Batch size.")
 parser.add_argument("--decay", default='exponential', type=str, help="Learning decay rate type")
-parser.add_argument("--dropout", default=0.5, type=float, help="Dropout regularization.") #
-parser.add_argument("--embedding_size", default=48, type=float, help="Dimension of the embedding layer.") #
-parser.add_argument("--embedding_dropout", default=0.25, type=float, help="Embedding dropout regularization.") #
+parser.add_argument("--dropout", default=0.5, type=float, help="Dropout regularization.")
+parser.add_argument("--embedding_dropout", default=0.25, type=float, help="Embedding dropout regularization.")
+parser.add_argument("--embedding_size", default=48, type=float, help="Dimension of the embedding layer.")
 parser.add_argument("--epochs", default=20, type=int, help="Number of epochs.")
-parser.add_argument("--hidden_layers", default="512", type=str, help="Hidden layer configuration.") #
-parser.add_argument("--label_smoothing", default=0, type=float, help="Label smoothing.") #
-parser.add_argument("--learning_rate", default=0.01, type=float, help="Initial learning rate.") #
-parser.add_argument("--learning_rate_final", default=0.0001, type=float, help="Final learning rate.") #
+parser.add_argument("--hidden_layers", default="512", type=str, help="Hidden layer configuration.")
+parser.add_argument("--label_smoothing", default=0, type=float, help="Label smoothing.")
+parser.add_argument("--learning_rate", default=0.01, type=float, help="Initial learning rate.")
+parser.add_argument("--learning_rate_final", default=0.0001, type=float, help="Final learning rate.")
 parser.add_argument("--momentum", default=None, type=float, help="Momentum.")
 parser.add_argument("--optimizer", default="Adam", type=str, help="Optimizer to use.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
-parser.add_argument("--window", default=7, type=int, help="Window size to use.") #
+parser.add_argument("--window", default=7, type=int, help="Window size to use.")
 
 args = parser.parse_args()
 args.hidden_layers = [int(hidden_layer) for hidden_layer in args.hidden_layers.split(",") if hidden_layer]
