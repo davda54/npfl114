@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 import argparse
+import os
 
 import numpy as np
 import tensorflow as tf
 from bayes_opt import BayesianOptimization
 from bayes_opt.event import Events
-from bayes_opt.observer import JSONLogger
+from bayes_opt.observer import JSONLogger, ScreenLogger
+from bayes_opt.util import load_logs
 
 from uppercase_data import UppercaseData
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--activation", default="elu", type=str, help="Activation function.")
+parser.add_argument("--activation", default="relu", type=str, help="Activation function.")
 parser.add_argument("--batch_size", default=1024, type=int, help="Batch size.")
 parser.add_argument("--decay", default='exponential', type=str, help="Learning decay rate type")
 parser.add_argument("--epochs", default=20, type=int, help="Number of epochs.")
@@ -97,10 +99,26 @@ def model_accuracy(alphabet_size, dropout, embedding_size, layer_size, label_smo
     test_logs = model.evaluate(
         uppercase_data.dev.data["windows"],
         sparse_to_distribution(uppercase_data.dev.data["labels"], label_smoothing),
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        verbose=0
     )
 
-    return test_logs[model.metrics_names.index("accuracy")]
+    accuracy = test_logs[model.metrics_names.index("accuracy")]
+    filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{}".format(
+        "acc={:.2f}".format(100*accuracy),
+        "a_s={}".format(alphabet_size),
+        "d={:.2f}".format(dropout),
+        "e_s={}".format(embedding_size),
+        "h_s={}".format(layer_size),
+        "l_s={:.4f}".format(label_smoothing),
+        "l_r={:.6f}".format(learning_rate),
+        "l_r_f={:.8f}".format(learning_rate_final),
+        "w={}".format(window),
+        "act=relu"
+    ))
+    model.save(filename, include_optimizer=False)
+
+    return accuracy
 
 
 pbounds = {
@@ -120,11 +138,13 @@ optimizer = BayesianOptimization(
     verbose=2,
     random_state=1,
 )
+load_logs(optimizer, logs=["./parameters_log.json"])
 
-logger = JSONLogger(path="./parameters_log.json")
+logger = JSONLogger(path="./parameters_log_new.json")
 optimizer.subscribe(Events.OPTMIZATION_STEP, logger)
+optimizer.subscribe(Events.OPTMIZATION_STEP, ScreenLogger())
 
 optimizer.maximize(
-    init_points=2,
-    n_iter=3,
+    init_points=max(0, 10-len(optimizer.space)),
+    n_iter=40-max(len(optimizer.space)-10, 0),
 )
