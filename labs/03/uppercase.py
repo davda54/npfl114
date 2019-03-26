@@ -108,10 +108,10 @@ model.compile(
 )
 
 filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{},{}".format(
-    "acc={val_accuracy:.2f}",
+    "acc={val_accuracy:.4f}",
     "a_s={}".format(args.alphabet_size),
     "d={:.2f}".format(args.dropout),
-    "e_s={}".format(0),
+    "e_s={}".format(args.embedding_size),
     "h_s={}".format(args.hidden_layers[0]),
     "l_s={:.4f}".format(args.label_smoothing),
     "l_r={:.6f}".format(args.learning_rate),

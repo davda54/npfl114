@@ -83,7 +83,6 @@ def model_accuracy(alphabet_size, dropout, embedding_size, label_smoothing, laye
     # Create the model
     model = tf.keras.Sequential([
         tf.keras.layers.Embedding(alphabet_size, embedding_size, input_length=2*window + 1),
-        # tf.keras.layers.Lambda(lambda x: tf.one_hot(x, alphabet_size), input_shape=[2 * window + 1]),
         tf.keras.layers.Flatten(),
         tf.keras.layers.Dense(layer_size, activation=activation_dict[args.activation]),
         tf.keras.layers.Dropout(dropout),
@@ -99,10 +98,10 @@ def model_accuracy(alphabet_size, dropout, embedding_size, label_smoothing, laye
     )
 
     filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{},{}".format(
-        "acc={val_accuracy:.2f}",
+        "acc={val_accuracy:.4f}",
         "a_s={}".format(alphabet_size),
         "d={:.2f}".format(dropout),
-        "e_s={}".format(0),
+        "e_s={}".format(embedding_size),
         "h_s={}".format(layer_size),
         "l_s={:.4f}".format(label_smoothing),
         "l_r={:.6f}".format(learning_rate),
