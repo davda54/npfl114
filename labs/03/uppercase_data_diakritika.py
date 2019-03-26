@@ -22,16 +22,17 @@ class UppercaseDataDiakritika:
     LABELS = 2
 
     class Dataset:
-        def __init__(self, data, window, alphabet, shuffle_batches, seed=42):
+        def __init__(self, data, window, alphabet, shuffle_batches, compact_digits, seed=42):
             self._window = window
             self._text = data
             self._size = len(self._text)
+            self._compact_digits = compact_digits
 
             # Create alphabet_map
-            alphabet_map = {"<pad>": 0, "<unk>": 1}
+            self._alphabet_map = {"<pad>": 0, "<unk>": 1}
             if not isinstance(alphabet, int):
                 for index, letter in enumerate(alphabet):
-                    alphabet_map[letter] = index
+                    self._alphabet_map[letter] = index
             else:
                 # Find most frequent characters
                 freqs = {}
@@ -41,23 +42,17 @@ class UppercaseDataDiakritika:
 
                 most_frequent = sorted(freqs.items(), key=lambda item:item[1], reverse=True)
 
-                for i, (char, freq) in enumerate(most_frequent, len(alphabet_map)):
-                    alphabet_map[char] = i
-                    if alphabet and len(alphabet_map) >= alphabet: break
+                for i, (char, freq) in enumerate(most_frequent, len(self._alphabet_map)):
+                    self._alphabet_map[char] = i
+                    if alphabet and len(self._alphabet_map) >= alphabet: break
 
             # Remap lowercased input characters uing the alphabet_map
             lcletters = np.zeros(self._size + 2 * window, np.int16)
             for i in range(self._size):
-                char = self._text[i].lower()
-                if char.isdigit():
-                    char = '0'
-                if char not in alphabet_map:
-                    decoded_char = unidecode.unidecode(char)
-                    if decoded_char not in alphabet_map:
-                        char = "<unk>"
-                    else:
-                        char = decoded_char
-                lcletters[i + window] = alphabet_map[char]
+                char = self.transform_char(self._text[i])
+                if char not in self._alphabet_map:
+                    char = "<unk>"
+                lcletters[i + window] = self._alphabet_map[char]
 
             # Generate batches data
             windows = np.zeros([self._size, 2 * window + 1], np.int16)
@@ -68,8 +63,8 @@ class UppercaseDataDiakritika:
             self._data = {"windows": windows, "labels": labels}
 
             # Compute alphabet
-            self._alphabet = [None] * len(alphabet_map)
-            for key, value in alphabet_map.items():
+            self._alphabet = [None] * len(self._alphabet_map)
+            for key, value in self._alphabet_map.items():
                 self._alphabet[value] = key
 
             self._shuffler = np.random.RandomState(seed) if shuffle_batches else None
@@ -90,6 +85,13 @@ class UppercaseDataDiakritika:
         def size(self):
             return self._size
 
+        def transform_char(self, char):
+            if self._compact_digits and char.isdigit():
+                return '0'
+            if char not in self._alphabet_map:
+                return unidecode.unidecode(char).lower()
+            return char.lower()
+
         def batches(self, size=None):
             permutation = self._shuffler.permutation(self._size) if self._shuffler else np.arange(self._size)
             while len(permutation):
@@ -103,7 +105,7 @@ class UppercaseDataDiakritika:
                 yield batch
 
 
-    def __init__(self, window, alphabet_size=0):
+    def __init__(self, window, alphabet_size=0, compact_digits=False):
 
         path = 'uppercase_data_augmented.zip'
 
@@ -116,6 +118,7 @@ class UppercaseDataDiakritika:
                     window,
                     alphabet=alphabet_size if dataset == "train" else self.train.alphabet,
                     shuffle_batches=dataset == "train",
+                    compact_digits=compact_digits
                 ))
 
 # from random import randint, shuffle

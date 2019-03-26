@@ -8,21 +8,23 @@ import numpy as np
 import tensorflow as tf
 
 from uppercase_data_diakritika import UppercaseDataDiakritika
+from uppercase_data import UppercaseData
+
 
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--activation", default="relu", type=str, help="Activation function.")
-parser.add_argument("--alphabet_size", default=64, type=int, help="If nonzero, limit alphabet to this many most frequent chars.")
-parser.add_argument("--batch_size", default=1024, type=int, help="Batch size.")
+parser.add_argument("--alphabet_size", default=90, type=int, help="If nonzero, limit alphabet to this many most frequent chars.")
+parser.add_argument("--batch_size", default=500, type=int, help="Batch size.")
 parser.add_argument("--decay", default='exponential', type=str, help="Learning decay rate type")
-parser.add_argument("--dropout", default=0.11, type=float, help="Dropout regularization.")
+parser.add_argument("--dropout", default=0.3187135, type=float, help="Dropout regularization.")
 parser.add_argument("--embedding_dropout", default=0.25, type=float, help="Embedding dropout regularization.")
-parser.add_argument("--embedding_size", default=48, type=float, help="Dimension of the embedding layer.")
-parser.add_argument("--epochs", default=20, type=int, help="Number of epochs.")
+parser.add_argument("--embedding_size", default=32, type=float, help="Dimension of the embedding layer.")
+parser.add_argument("--epochs", default=400, type=int, help="Number of epochs.")
 parser.add_argument("--hidden_layers", default="2048", type=str, help="Hidden layer configuration.")
-parser.add_argument("--label_smoothing", default=0.187, type=float, help="Label smoothing.")
-parser.add_argument("--learning_rate", default=0.001, type=float, help="Initial learning rate.")
-parser.add_argument("--learning_rate_final", default=0.00005, type=float, help="Final learning rate.")
+parser.add_argument("--label_smoothing", default=0.130845, type=float, help="Label smoothing.")
+parser.add_argument("--learning_rate", default=10**-3.29330225, type=float, help="Initial learning rate.")
+parser.add_argument("--learning_rate_final", default=10**-5.04847912, type=float, help="Final learning rate.")
 parser.add_argument("--momentum", default=None, type=float, help="Momentum.")
 parser.add_argument("--optimizer", default="Adam", type=str, help="Optimizer to use.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
@@ -57,10 +59,11 @@ args.logdir = os.path.join("logs", "{}-{}-{}".format(
 uppercase_data = UppercaseDataDiakritika(args.window, args.alphabet_size)
 
 def learning_rate(decay):
-    decay_steps = args.epochs * uppercase_data.train.size // args.batch_size
+    decay_steps = 5 * uppercase_data.train.size // args.batch_size
+    decay_rate = (args.learning_rate_final / args.learning_rate) ** (1 / (float(args.epochs/5) - 1))
     if decay is None: return args.learning_rate
-    elif decay == 'polynomial': return tf.optimizers.schedules.PolynomialDecay(args.learning_rate, decay_steps, args.learning_rate_final)
-    elif decay == 'exponential': return tf.optimizers.schedules.ExponentialDecay(args.learning_rate, decay_steps, args.learning_rate_final / args.learning_rate)
+    elif decay == 'polynomial': return tf.optimizers.schedules.PolynomialDecay(args.learning_rate, decay_steps*args.epochs, args.learning_rate_final)
+    elif decay == 'exponential': return tf.optimizers.schedules.ExponentialDecay(args.learning_rate, decay_steps, decay_rate, staircase=True)
 
 def optimizer(type):
     if type == 'SGD':return tf.optimizers.SGD(learning_rate=learning_rate(args.decay), momentum=0.0 if args.momentum is None else args.momentum)
@@ -107,7 +110,7 @@ model.compile(
     metrics=[tf.keras.metrics.CategoricalAccuracy(name="accuracy") if args.label_smoothing > 0 else tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
 )
 
-filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{},{}".format(
+filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{}".format(
     "acc={val_accuracy:.4f}",
     "a_s={}".format(args.alphabet_size),
     "d={:.2f}".format(args.dropout),
@@ -117,8 +120,7 @@ filename = os.path.join("models", "{},{},{},{},{},{},{},{},{},{},{}".format(
     "l_r={:.6f}".format(args.learning_rate),
     "l_r_f={:.8f}".format(args.learning_rate_final),
     "w={}".format(args.window),
-    "act={}".format(args.activation),
-    "diac=True"
+    "act={}".format(args.activation)
 ))
 
 tb_callback=tf.keras.callbacks.TensorBoard(args.logdir, update_freq=1000, profile_batch=1)
@@ -129,7 +131,7 @@ model.fit(
     validation_data=(uppercase_data.dev.data["windows"], sparse_to_distribution(uppercase_data.dev.data["labels"]) if args.label_smoothing > 0 else uppercase_data.dev.data["labels"]),
     callbacks=[
         tb_callback,
-        tf.keras.callbacks.EarlyStopping(monitor='val_accuracy'),
+        #tf.keras.callbacks.EarlyStopping(monitor='val_accuracy'),
         tf.keras.callbacks.ModelCheckpoint(filename, monitor='val_accuracy', save_best_only=True)],
     verbose=2
 )

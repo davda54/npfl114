@@ -81,6 +81,9 @@ class UppercaseData:
         def size(self):
             return self._size
 
+        def transform_char(self, char):
+            return char.lower()
+
         def batches(self, size=None):
             permutation = self._shuffler.permutation(self._size) if self._shuffler else np.arange(self._size)
             while len(permutation):

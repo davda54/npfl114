@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import zipfile
 
 import numpy as np
 import tensorflow as tf
@@ -14,7 +15,7 @@ parser.add_argument("--models_path", default="./ensamble_models", type=str)
 parser.add_argument("--output", default="", type=str)
 args = parser.parse_args()
 
-original_data = UppercaseData(9, 128)
+original_data = UppercaseData(0, 128)
 p = np.zeros((original_data.dev.size, 2))
 
 for filename in os.listdir(args.models_path):
@@ -22,7 +23,7 @@ for filename in os.listdir(args.models_path):
 
     alphabet_size = int(parameters['a_s'])
     window_size = int(parameters['w'])
-    if "diac" in parameters: uppercase_data = UppercaseDataDiakritika(window_size, alphabet_size)
+    if "diac" in parameters: uppercase_data = UppercaseDataDiakritika(window_size, alphabet_size, "digits" in parameters)
     else: uppercase_data = UppercaseData(window_size, alphabet_size)
 
     model = tf.keras.models.load_model(os.path.join(args.models_path, filename), compile=False)
@@ -30,14 +31,18 @@ for filename in os.listdir(args.models_path):
     model_p = model.predict(uppercase_data.dev.data["windows"])
 
     for i, c in enumerate(original_data.dev.text):
-        if c.lower() not in uppercase_data.dev.alphabet: continue
+        if uppercase_data.dev.transform_char(c) not in uppercase_data.dev.alphabet: continue
+        # if model_p[i, 0] < model_p[i, 1]:
+        #     p[i, 1] += 1
+        # else:
+        #     p[i, 0] += 1
         p[i] += model_p[i]
 
 
 with open("dev_out.txt", "w", encoding="utf-8") as file:
     for i, c in enumerate(original_data.dev.text):
         c = c.lower()
-        file.write(c.upper() if p[i, 0] < p[i, 1] and c in original_data.dev.alphabet else c)
+        file.write(c.upper() if p[i, 0] < p[i, 1] else c)
 
 
 

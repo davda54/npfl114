@@ -4,6 +4,45 @@ import tensorflow as tf
 
 from mnist import MNIST
 
+def connect_layer(input, layer_args):
+    p = [int(ch) if ch.isdigit() else ch for ch in layer_args.split('-')]
+
+    if p[0] == 'C':
+        hidden = tf.keras.layers.Conv2D(filters=p[1], kernel_size=p[2], strides=p[3], padding=p[4], activation=tf.nn.relu)(input)
+    elif p[0] == 'CB':
+        hidden = tf.keras.layers.Conv2D(filters=p[1], kernel_size=p[2], strides=p[3], padding=p[4], activation=None, use_bias=False)(input)
+        hidden = tf.keras.layers.BatchNormalization()(hidden)
+        hidden = tf.nn.relu(hidden)
+    elif p[0] == 'M':
+        hidden = tf.keras.layers.MaxPool2D(pool_size=p[1], strides=p[2])(input)
+    elif p[0] == 'R':
+        hidden = input
+        for layer in split_layers(layer_args[3:-1]):
+            hidden = connect_layer(hidden, layer)
+        hidden += input
+    elif p[0] == 'F':
+        hidden = tf.keras.layers.Flatten()(input)
+    elif p[0] == 'D':
+        hidden = tf.keras.layers.Dense(units=p[1], activation = tf.nn.relu)(input)
+
+    return hidden
+
+def split_layers(layers_args):
+    word = []
+    brackets = 0
+    for c in layers_args:
+        if c != ',' or brackets > 0:
+            word.append(c)
+            if c == '[': brackets += 1
+            elif c == ']': brackets -= 1
+        else:
+            if word:
+                yield ''.join(word)
+                word = []
+    if word:
+        yield ''.join(word)
+
+
 # The neural network model
 class Network(tf.keras.Model):
     def __init__(self, args):
@@ -23,6 +62,10 @@ class Network(tf.keras.Model):
         # - `F`: Flatten inputs. Must appear exactly once in the architecture.
         # - `D-hidden_layer_size`: Add a dense layer with ReLU activation and specified size.
         # Produce the results in variable `hidden`.
+
+        hidden = inputs
+        for layer in split_layers(args.cnn):
+            hidden = connect_layer(hidden, layer)
 
         # Add the final output layer
         outputs = tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax)(hidden)
@@ -61,10 +104,10 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
-    parser.add_argument("--cnn", default=None, type=str, help="CNN architecture.")
+    parser.add_argument("--cnn", default='C-8-3-5-valid,R-[C-8-3-1-same,C-8-3-1-same],F,D-50', type=str, help="CNN architecture.")
     parser.add_argument("--epochs", default=30, type=int, help="Number of epochs.")
     parser.add_argument("--recodex", default=False, action="store_true", help="Evaluation in ReCodEx.")
-    parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
+    parser.add_argument("--threads", default=0, type=int, help="Maximum number of threads to use.")
     args = parser.parse_args()
 
     # Fix random seeds and number of threads
