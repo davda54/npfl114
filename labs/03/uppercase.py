@@ -14,21 +14,21 @@ from uppercase_data import UppercaseData
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--activation", default="relu", type=str, help="Activation function.")
-parser.add_argument("--alphabet_size", default=90, type=int, help="If nonzero, limit alphabet to this many most frequent chars.")
-parser.add_argument("--batch_size", default=500, type=int, help="Batch size.")
-parser.add_argument("--decay", default='exponential', type=str, help="Learning decay rate type")
-parser.add_argument("--dropout", default=0.3187135, type=float, help="Dropout regularization.")
+parser.add_argument("--alphabet_size", default=117, type=int, help="If nonzero, limit alphabet to this many most frequent chars.")
+parser.add_argument("--batch_size", default=1024, type=int, help="Batch size.")
+parser.add_argument("--decay", default="exponential", type=str, help="Learning decay rate type")
+parser.add_argument("--dropout", default=0.14922896128169993, type=float, help="Dropout regularization.")
 parser.add_argument("--embedding_dropout", default=0.25, type=float, help="Embedding dropout regularization.")
-parser.add_argument("--embedding_size", default=32, type=float, help="Dimension of the embedding layer.")
-parser.add_argument("--epochs", default=400, type=int, help="Number of epochs.")
+parser.add_argument("--embedding_size", default=38, type=float, help="Dimension of the embedding layer.")
+parser.add_argument("--epochs", default=20, type=int, help="Number of epochs.")
 parser.add_argument("--hidden_layers", default="2048", type=str, help="Hidden layer configuration.")
-parser.add_argument("--label_smoothing", default=0.130845, type=float, help="Label smoothing.")
-parser.add_argument("--learning_rate", default=10**-3.29330225, type=float, help="Initial learning rate.")
-parser.add_argument("--learning_rate_final", default=10**-5.04847912, type=float, help="Final learning rate.")
+parser.add_argument("--label_smoothing", default=0.3, type=float, help="Label smoothing.")
+parser.add_argument("--learning_rate", default=10**-3.5074562502745232, type=float, help="Initial learning rate.")
+parser.add_argument("--learning_rate_final", default=10**-5.279566032119072, type=float, help="Final learning rate.")
 parser.add_argument("--momentum", default=None, type=float, help="Momentum.")
 parser.add_argument("--optimizer", default="Adam", type=str, help="Optimizer to use.")
 parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
-parser.add_argument("--window", default=7, type=int, help="Window size to use.")
+parser.add_argument("--window", default=11, type=int, help="Window size to use.")
 
 args = parser.parse_args()
 args.hidden_layers = [int(hidden_layer) for hidden_layer in args.hidden_layers.split(",") if hidden_layer]
@@ -59,8 +59,8 @@ args.logdir = os.path.join("logs", "{}-{}-{}".format(
 uppercase_data = UppercaseDataDiakritika(args.window, args.alphabet_size)
 
 def learning_rate(decay):
-    decay_steps = 5 * uppercase_data.train.size // args.batch_size
-    decay_rate = (args.learning_rate_final / args.learning_rate) ** (1 / (float(args.epochs/5) - 1))
+    decay_steps = uppercase_data.train.size // args.batch_size
+    decay_rate = (args.learning_rate_final / args.learning_rate) ** (1 / (float(args.epochs) - 1))
     if decay is None: return args.learning_rate
     elif decay == 'polynomial': return tf.optimizers.schedules.PolynomialDecay(args.learning_rate, decay_steps*args.epochs, args.learning_rate_final)
     elif decay == 'exponential': return tf.optimizers.schedules.ExponentialDecay(args.learning_rate, decay_steps, decay_rate, staircase=True)
@@ -131,7 +131,8 @@ model.fit(
     validation_data=(uppercase_data.dev.data["windows"], sparse_to_distribution(uppercase_data.dev.data["labels"]) if args.label_smoothing > 0 else uppercase_data.dev.data["labels"]),
     callbacks=[
         tb_callback,
-        #tf.keras.callbacks.EarlyStopping(monitor='val_accuracy'),
+        tf.keras.callbacks.EarlyStopping(monitor='val_accuracy'),
+        #tf.keras.callbacks.ReduceLROnPlateau(monitor='val_accuracy', factor=0.2, patience=2),
         tf.keras.callbacks.ModelCheckpoint(filename, monitor='val_accuracy', save_best_only=True)],
     verbose=2
 )

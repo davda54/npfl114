@@ -22,7 +22,7 @@ class UppercaseDataDiakritika:
     LABELS = 2
 
     class Dataset:
-        def __init__(self, data, window, alphabet, shuffle_batches, compact_digits, seed=42):
+        def __init__(self, data, window, alphabet, shuffle_batches, compact_digits=False, seed=42):
             self._window = window
             self._text = data
             self._size = len(self._text)
@@ -120,21 +120,3 @@ class UppercaseDataDiakritika:
                     shuffle_batches=dataset == "train",
                     compact_digits=compact_digits
                 ))
-
-# from random import randint, shuffle
-#
-# u = UppercaseDataDiakritika(1, 128)
-# with open("training_without_diac.txt", "w", encoding="utf-8") as f:
-#     for c in u.train.text:
-#         if c.isdigit():
-#             f.write(str(randint(0, 9)))
-#         else:
-#             f.write(unidecode.unidecode(c))
-#
-# with open("training_without_diac.txt", "r", encoding="utf-8") as f:
-#     content = f.readlines()
-#
-# shuffle(content)
-#
-# with open("training_without_diac.txt", "w", encoding="utf-8") as f:
-#     f.writelines(content)

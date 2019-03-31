@@ -22,6 +22,7 @@ def process_stepic(filename):
     return np.mean(stepic_p[:, :, 0:2], axis=1)
 
 stepic_p = process_stepic('test_y_aligned.npy') + process_stepic('v4_test_y_aligned.npy')
+
 p = 0.5*stepic_p[:,::-1]
 
 for filename in os.listdir(args.models_path):
@@ -45,4 +46,3 @@ with open(args.output, "w", encoding="utf-8") as file:
     for i, c in enumerate(original_data.test.text):
         c = c.lower()
         file.write(c.upper() if p[i, 0] < p[i, 1] else c)
-
