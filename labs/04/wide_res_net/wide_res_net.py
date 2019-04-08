@@ -4,6 +4,7 @@
 
 import numpy as np
 import tensorflow as tf
+import math
 
 from tensorflow.keras.layers import BatchNormalization, ReLU, Dense, Conv2D, GlobalAveragePooling2D, Input
 from tensorflow.keras.regularizers import l2
@@ -37,10 +38,10 @@ class WideResNet(tf.keras.Model):
         )
         self.fit_generator(
             generator=data.train.batches(batch_size),
-            steps_per_epoch=data.train.size // batch_size,
+            steps_per_epoch=math.ceil(data.train.size / batch_size),
             epochs=num_epochs,
             validation_data=data.dev.batches(batch_size),
-            validation_steps=data.dev.size // batch_size,
+            validation_steps=math.ceil(data.dev.size / batch_size),
             callbacks=[tf.keras.callbacks.ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True,
                                                           save_weights_only=True)]
         )
