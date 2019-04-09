@@ -118,35 +118,6 @@ class WideResNet(tf.keras.Model):
         if label_smoothing == 0: return tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")
         return tf.keras.metrics.CategoricalAccuracy(name="accuracy")
 
-
-if __name__ == "__main__":
-    import argparse
-    import os
-
-    # Parse arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--train", default=False, type=bool, help="Train or just predict?")
-    parser.add_argument("--predict_augmentations", default=1, type=int, help="Number of augmentations of test data before the final prediction")
-    parser.add_argument("--model_path", default='wideresnet_models/tlustoprd_40-4_acc=0.9674', type=str, help="Path to weights of a model.")
-    parser.add_argument("--ensamble_directory", default='wideresnet_models', type=str, help="Path to weights of a model.")
-    parser.add_argument("--output_path", default='dev_out.txt', type=str, help="Path to test predictions.")
-    parser.add_argument("--depth", default=40, type=int, help="Depth of the network.")
-    parser.add_argument("--width_factor", default=4, type=int, help="Widening factor over classical resnet.")
-    # the weight decay is divided by two because: https://bbabenko.github.io/weight-decay/
-    parser.add_argument("--weight_decay", default=0.0005 / 2, type=int, help="L2 regularization parameter.")
-    parser.add_argument("--label_smoothing", default=0.1, type=float, help="Use 0 for no label smoothing")
-    parser.add_argument("--batch_size", default=128, type=int, help="Batch size.")
-    parser.add_argument("--eval_batch_size", default=128, type=int, help="Evaluation batch size.")
-    parser.add_argument("--epochs", default=200, type=int, help="Number of epochs.")
-    parser.add_argument("--threads", default=4, type=int, help="Maximum number of threads to use.")
-    args = parser.parse_args()
-
-    # Load data
-    cifar = CIFAR10(sparse_labels=args.label_smoothing == 0)
-
-    # Create the network
-    network = WideResNet(args.depth, args.width_factor, args.weight_decay)
-
     if args.train:
         checkpoint_path = os.path.join("wideresnet_models", "tlustoprd_28-10_{}".format("acc={val_accuracy:.4f}"))
         network.train(checkpoint_path, cifar, args.batch_size, args.epochs, args.label_smoothing)
@@ -158,4 +129,3 @@ if __name__ == "__main__":
 
     with open(args.output_path, "w", encoding="utf-8") as out_file:
         print(*predicted_labels, file=out_file, sep='\n')
-
