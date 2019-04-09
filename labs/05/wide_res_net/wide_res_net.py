@@ -13,7 +13,7 @@ tf.config.gpu.set_per_process_memory_growth(True)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 tf.config.threading.set_intra_op_parallelism_threads(4)
 
-from cifar10_augmented import CIFAR10
+from mnist_augmented import MNIST
 
 
 class WideResNet(tf.keras.Model):
@@ -49,7 +49,7 @@ class WideResNet(tf.keras.Model):
     def predict_augmented(self, input, augmentation_loops):
         labels = []
         for image in input:
-            ensamble = [CIFAR10.horizontal_flip(CIFAR10.translate(image, amount=4)) for _ in range(augmentation_loops)]
+            ensamble = [MNIST.horizontal_flip(MNIST.translate(image, amount=4)) for _ in range(augmentation_loops)]
             predictions = tf.nn.softmax(self.predict(np.array(ensamble)))
             labels.append(np.sum(predictions, axis=0))
 
@@ -59,7 +59,7 @@ class WideResNet(tf.keras.Model):
         filters = [16, 1*16 * self.width_factor, 2*16 * self.width_factor, 4*16 * self.width_factor]
         block_depth = (self.depth - 4) // (3 * 2)
 
-        x = inputs = Input(shape=(CIFAR10.H, CIFAR10.W, CIFAR10.C), dtype=tf.float32)
+        x = inputs = Input(shape=(MNIST.H, MNIST.W, MNIST.C), dtype=tf.float32)
         x = Conv2D(filters[0], kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal')(x)
 
@@ -70,7 +70,7 @@ class WideResNet(tf.keras.Model):
         x = BatchNormalization()(x)
         x = ReLU()(x)
         x = GlobalAveragePooling2D()(x)
-        outputs = Dense(CIFAR10.LABELS, activation=None)(x)
+        outputs = Dense(MNIST.LABELS, activation=None)(x)
 
         return inputs, outputs
 

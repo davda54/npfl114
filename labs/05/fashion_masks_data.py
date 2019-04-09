@@ -48,3 +48,4 @@ class FashionMasks:
         for dataset in ["train", "dev", "test"]:
             data = dict((key[len(dataset) + 1:], fashion_masks[key]) for key in fashion_masks if key.startswith(dataset))
             setattr(self, dataset, self.Dataset(data, shuffle_batches=dataset == "train"))
+
