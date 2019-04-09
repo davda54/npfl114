@@ -117,15 +117,4 @@ class WideResNet(tf.keras.Model):
     def _metric(self, label_smoothing):
         if label_smoothing == 0: return tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")
         return tf.keras.metrics.CategoricalAccuracy(name="accuracy")
-
-    if args.train:
-        checkpoint_path = os.path.join("wideresnet_models", "tlustoprd_28-10_{}".format("acc={val_accuracy:.4f}"))
-        network.train(checkpoint_path, cifar, args.batch_size, args.epochs, args.label_smoothing)
-
-    network.load_weights(args.model_path)
-    predicted_labels = network.predict_augmented(cifar.dev.data["images"], args.predict_augmentations)
-
-    print(np.mean(np.equal(np.argmax(cifar.dev.data["labels"], axis=1), np.array(predicted_labels))))
-
-    with open(args.output_path, "w", encoding="utf-8") as out_file:
-        print(*predicted_labels, file=out_file, sep='\n')
+    
