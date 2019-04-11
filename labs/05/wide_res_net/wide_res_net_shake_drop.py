@@ -5,8 +5,9 @@
 import numpy as np
 import tensorflow as tf
 import math
+import sys
 
-from tensorflow.keras.layers import BatchNormalization, ReLU, Dense, Conv2D, GlobalAveragePooling2D, Input, add
+from tensorflow.keras.layers import Layer, BatchNormalization, ReLU, Dense, Conv2D, GlobalAveragePooling2D, Input, add
 from tensorflow.keras.regularizers import l2
 
 tf.config.gpu.set_per_process_memory_growth(True)
@@ -15,6 +16,81 @@ tf.config.threading.set_intra_op_parallelism_threads(4)
 
 from mnist_augmented import MNIST
 
+
+# class ShakeDrop(Layer):
+#
+#     def __init__(self, level, total_levels, **kwargs):
+#         super(ShakeDrop, self).__init__(dynamic=True, **kwargs)
+#         self.pl = 0.5 * level / total_levels
+#
+#         self.alpha_bounds = [-1, 1]
+#         self.beta_bounds = [0, 1]
+#
+#     @tf.function
+#     def call(self, inputs, training=None):
+#
+#         x = inputs[0]
+#         r = inputs[1]
+#
+#         if training:
+#
+#             shake_shape = [tf.shape(x)[0]]
+#             bl = tf.math.floor(self.pl + tf.random.uniform(shape=shake_shape))
+#             gen_shape = [tf.dtypes.cast(tf.math.reduce_sum(bl), dtype=tf.int32)]
+#             indices = tf.dtypes.cast(tf.where(tf.dtypes.cast(bl, tf.bool)), tf.int32)
+#
+#             rand_alpha = tf.random.uniform(shape=gen_shape, minval=-1, maxval=1)
+#             rand_beta = tf.random.uniform(shape=gen_shape, minval=0, maxval=1)
+#
+#             alpha = tf.scatter_nd(indices, rand_alpha, shake_shape)
+#             beta = tf.scatter_nd(indices, rand_beta, shake_shape)
+#
+#             alpha = tf.reshape(alpha, [-1,1,1,1])
+#             beta = tf.reshape(beta, [-1,1,1,1])
+#
+#             x = x * beta + tf.stop_gradient(x * alpha - x * beta)
+#
+#         else:
+#             x = self.pl * x
+#
+#         return r + x
+#
+#     def compute_output_shape(self, input_shape):
+#         return input_shape[0]
+
+class ShakeDrop(Layer):
+
+    def __init__(self, level, total_levels, **kwargs):
+        super(ShakeDrop, self).__init__(dynamic=True, **kwargs)
+        self.pl = 1 - 0.5 * level / total_levels
+
+        self.alpha_bounds = [-1, 1]
+        self.beta_bounds = [0, 1]
+
+    @tf.function
+    def call(self, inputs, training=None):
+
+        x = inputs[0]
+        r = inputs[1]
+
+        if training:
+
+            shake_shape = [tf.shape(x)[0], 1, 1, 1]
+            bl = tf.math.floor(self.pl + tf.random.uniform(shape=shake_shape))
+            alpha = tf.random.uniform(shape=shake_shape, minval=-1, maxval=1)
+            beta = tf.random.uniform(shape=shake_shape, minval=0, maxval=1)
+
+            fwd = bl + alpha * (1 - bl)
+            bwd = bl + beta * (1 - bl)
+            x = x * bwd + tf.stop_gradient(x * fwd - x * bwd)
+
+        else:
+            x = self.pl * x
+
+        return r + x
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0]
 
 class WideResNet(tf.keras.Model):
     def __init__(self, depth, width_factor, weight_decay):
@@ -53,14 +129,16 @@ class WideResNet(tf.keras.Model):
     def _build(self):
         filters = [16, 1*16 * self.width_factor, 2*16 * self.width_factor, 4*16 * self.width_factor]
         block_depth = (self.depth - 4) // (3 * 2)
+        total_block_depth = block_depth * 3
 
         x = inputs = Input(shape=(MNIST.H, MNIST.W, MNIST.C), dtype=tf.float32)
         x = Conv2D(filters[0], kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal')(x)
 
-        x = self._block(x, stride=1, depth=block_depth, filters=filters[1])  # No pooling
-        x = self._block(x, stride=2, depth=block_depth, filters=filters[2])  # Puling ve dvi, should be 16x16
-        x = self._block(x, stride=2, depth=block_depth, filters=filters[3])  # Puling ve dvi, should be 8x8
+        level = [0]
+        x = self._block(x, stride=1, depth=block_depth, filters=filters[1], level=level, total_levels=total_block_depth)
+        x = self._block(x, stride=2, depth=block_depth, filters=filters[2], level=level, total_levels=total_block_depth)
+        x = self._block(x, stride=2, depth=block_depth, filters=filters[3], level=level, total_levels=total_block_depth)
 
         x = BatchNormalization()(x)
         x = ReLU()(x)
@@ -69,13 +147,15 @@ class WideResNet(tf.keras.Model):
 
         return inputs, outputs
 
-    def _block(self, x, stride, depth, filters):
-        x = self._downsample_layer(x, filters, stride)
+    def _block(self, x, stride, depth, filters, level, total_levels):
+        x = self._downsample_layer(x, filters, stride, level[0], total_levels)
+        level[0] += 1
         for _ in range(depth - 1):
-            x = self._basic_layer(x, filters)
+            x = self._basic_layer(x, filters, level[0], total_levels)
+            level[0] += 1
         return x
 
-    def _basic_layer(self, x, filters):
+    def _basic_layer(self, x, filters, level, total_levels):
         block = tf.keras.Sequential([
             BatchNormalization(),
             ReLU(),
@@ -86,9 +166,9 @@ class WideResNet(tf.keras.Model):
             Conv2D(filters, kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal'),
         ])
-        return add([block(x), x])
+        return ShakeDrop(level, total_levels)([block(x), x])
 
-    def _downsample_layer(self, x, filters, stride):
+    def _downsample_layer(self, x, filters, stride, level, total_levels):
         x = BatchNormalization()(x)
         x = ReLU()(x)
 
@@ -103,7 +183,7 @@ class WideResNet(tf.keras.Model):
         downsample = Conv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias=False,
                             kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal')
 
-        return add([block(x), downsample(x)])
+        return ShakeDrop(level, total_levels)([block(x), downsample(x)])
 
     def _loss(self, label_smoothing):
         if label_smoothing == 0: return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)

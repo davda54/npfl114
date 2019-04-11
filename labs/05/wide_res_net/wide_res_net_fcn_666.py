@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 import math
 
-from tensorflow.keras.layers import BatchNormalization, ReLU, Dense, Conv2D, GlobalAveragePooling2D, Input, add
+from tensorflow.keras.layers import Layer, BatchNormalization, ReLU, Dense, Conv2D, GlobalAveragePooling2D, Input, add
 from tensorflow.keras.regularizers import l2
 
 tf.config.gpu.set_per_process_memory_growth(True)
@@ -25,7 +25,7 @@ class WideResNet(tf.keras.Model):
         inputs, outputs = self._build()
         super().__init__(inputs, outputs)
 
-    def train(self, checkpoint_path, data, batch_size, num_epochs, label_smoothing, learning_rate):
+    def train(self, checkpoint_path, data, batch_size, num_epochs, starting_epoch, label_smoothing, learning_rate):
         self.compile(
             optimizer=tf.optimizers.SGD(learning_rate, momentum=0.9, nesterov=True),
             loss=self._loss(label_smoothing),
@@ -38,38 +38,44 @@ class WideResNet(tf.keras.Model):
             validation_data=data.dev.batches(batch_size),
             validation_steps=math.ceil(data.dev.size / batch_size),
             callbacks=[tf.keras.callbacks.ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True,
-                                                          save_weights_only=True)]
+                                                          save_weights_only=True)],
+            initial_epoch=starting_epoch
         )
 
-    def predict_augmented(self, input, augmentation_loops):
-        labels = []
-        for image in input:
-            ensamble = [MNIST.horizontal_flip(MNIST.translate(image, amount=4)) for _ in range(augmentation_loops)]
-            predictions = tf.nn.softmax(self.predict(np.array(ensamble)))
-            labels.append(np.sum(predictions, axis=0))
-
-        return np.array(labels)
-
     def _build(self):
-        filters = [16, 1*16 * self.width_factor, 2*16 * self.width_factor, 4*16 * self.width_factor]
-        block_depth = (self.depth - 4) // (3 * 2)
+        filters = [16, 1 * 16 * self.width_factor, 2 * 16 * self.width_factor, 4 * 16 * self.width_factor]
+        down_block_depth = (self.depth - 4) // (3 * 2)
+        up_block_depth = down_block_depth
+        total_block_depth = down_block_depth * 3
 
         x = inputs = Input(shape=(MNIST.H, MNIST.W, MNIST.C), dtype=tf.float32)
         x = Conv2D(filters[0], kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal')(x)
 
-        x = self._block(x, stride=1, depth=block_depth, filters=filters[1])  # No pooling
-        x = self._block(x, stride=2, depth=block_depth, filters=filters[2])  # Puling ve dvi, should be 16x16
-        x = self._block(x, stride=2, depth=block_depth, filters=filters[3])  # Puling ve dvi, should be 8x8
+        level = [0]
+        x_1 = self._down_block(x, stride=1, depth=down_block_depth, filters=filters[1], level=level, total_levels=total_block_depth)
+        x_2 = self._down_block(x_1, stride=2, depth=down_block_depth, filters=filters[2], level=level, total_levels=total_block_depth)
+        x_3 = self._down_block(x_2, stride=2, depth=down_block_depth, filters=filters[3], level=level, total_levels=total_block_depth)
 
-        x = BatchNormalization()(x)
-        x = ReLU()(x)
-        x = GlobalAveragePooling2D()(x)
-        outputs = Dense(MNIST.LABELS, activation=None)(x)
+        mask_x = self._up_block(self, x_3, x_2, depth=up_block_depth, filters=filters[2])
+        mask_x = self._up_block(self, mask_x, x_1, depth=up_block_depth, filters=filters[1])
 
-        return inputs, outputs
+        # mask_prediction = name='mask_output'
 
-    def _block(self, x, stride, depth, filters):
+        class_x = BatchNormalization()(x_3)
+        class_x = ReLU()(class_x)
+        class_x = GlobalAveragePooling2D()(class_x)
+        class_prediction = Dense(MNIST.LABELS, activation=None, name='class_output')(class_x)
+
+        return inputs, [class_prediction, mask_prediction]
+
+    def _up_block(self, x, residual, depth, filters):
+        x = self._upsample_layer(x, filters, stride=2)
+        for _ in range(depth - 1):
+            x = self._basic_layer(x, filters)
+        return x
+
+    def _down_block(self, x, stride, depth, filters,):
         x = self._downsample_layer(x, filters, stride)
         for _ in range(depth - 1):
             x = self._basic_layer(x, filters)
@@ -85,10 +91,14 @@ class WideResNet(tf.keras.Model):
             ReLU(),
             Conv2D(filters, kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal'),
+            BatchNormalization()
         ])
-        return add([block(x), x])
+        return block(x) + x
 
-    def _downsample_layer(self, x, filters, stride):
+    def _upsample_layer(self, x, filters, stride):
+
+
+    def _downsample_layer(self, x, filters, stride, level, total_levels):
         x = BatchNormalization()(x)
         x = ReLU()(x)
 
@@ -99,16 +109,21 @@ class WideResNet(tf.keras.Model):
             ReLU(),
             Conv2D(filters, kernel_size=3, strides=1, padding='same', use_bias=False,
                    kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal'),
+            BatchNormalization()
         ])
         downsample = Conv2D(filters, kernel_size=1, strides=stride, padding='same', use_bias=False,
                             kernel_regularizer=l2(self.weight_decay), kernel_initializer='he_normal')
 
-        return add([block(x), downsample(x)])
+        return block(x) + downsample(x)
 
     def _loss(self, label_smoothing):
-        if label_smoothing == 0: return tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-        return tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=label_smoothing)
+        if label_smoothing == 0: class_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+        else: class_loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=label_smoothing)
+        mask_loss = tf.losses.BinaryCrossentropy()
+        return [class_loss, mask_loss]
 
     def _metric(self, label_smoothing):
-        if label_smoothing == 0: return tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")
-        return tf.keras.metrics.CategoricalAccuracy(name="accuracy")
+        if label_smoothing == 0: class_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")
+        else: class_accuracy = tf.keras.metrics.CategoricalAccuracy(name="accuracy")
+        mask_accuracy = tf.metrics.MeanIoU(num_classes=2)
+        return [class_accuracy, mask_accuracy]
