@@ -43,15 +43,20 @@ class Dataset:
 class Network:
     def __init__(self, args):
         sequences = tf.keras.layers.Input(shape=[args.sequence_length, args.sequence_dim])
-        # TODO: Process the sequence using the given `args.rnn_cell` RNN cell,
-        # with dimensionality `args.rnn_cell_dim`. Use `return_sequences=True`
+        # TODO: Process the sequence using a RNN with cell type `args.rnn_cell`
+        # and with dimensionality `args.rnn_cell_dim`. Use `return_sequences=True`
         # to get outputs for all sequence elements.
+        #
+        # Prefer `tf.keras.layers.LSTM` (and analogously for `GRU` and
+        # `SimpleRNN`) to `tf.keras.layers.RNN` wrapper with
+        # `tf.keras.layers.LSTMCell` (the former can run transparently on a GPU
+        # and is also considerably faster on a CPU).
 
         # TODO: If `args.hidden_layer` is defined, process the result using
         # a ReLU-activated fully connected layer with `args.hidden_layer` units.
 
         # TODO: Generate predictions using a fully connected layer
-        # wit one output and `tf.nn.sigmoid` activation.
+        # with one output and `tf.nn.sigmoid` activation.
         self.model = tf.keras.Model(inputs=sequences, outputs=predictions)
 
         # TODO: Create an Adam optimizer in self._optimizer
@@ -139,6 +144,7 @@ if __name__ == "__main__":
     tf.random.set_seed(42)
     if args.recodex:
         tf.keras.utils.get_custom_objects()["glorot_uniform"] = lambda: tf.keras.initializers.glorot_uniform(seed=42)
+        tf.keras.utils.get_custom_objects()["orthogonal"] = lambda: tf.keras.initializers.orthogonal(seed=42)
     tf.config.threading.set_inter_op_parallelism_threads(args.threads)
     tf.config.threading.set_intra_op_parallelism_threads(args.threads)
 
