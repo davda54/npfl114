@@ -53,10 +53,11 @@ class MNIST:
 
                     images = self._data["images"][batch_perm]
                     labels = self._data["labels"][batch_perm]
-                    masks = self._sdata["masks"][batch_perm]
+                    masks = self._data["masks"][batch_perm]
 
                     if self._use_augmentation:
-                        images, masks = np.array(list(map(MNIST.augment, images, masks)))
+                        images, masks = zip(*([MNIST.augment(i, m) for i,m in zip(images, masks)]))
+                        images, masks = np.array(images), np.array(masks)
 
                     yield (images, [labels, masks])
 
@@ -74,11 +75,11 @@ class MNIST:
 
     @staticmethod
     def augment(image, mask):
-        return MNIST.horizontal_flip(**MNIST.cutout(**MNIST.translate(image, mask)))
+        return MNIST.horizontal_flip(*MNIST.cutout(*MNIST.translate(image, mask)))
 
     @staticmethod
     def cutout(image, mask):
-        if np.random.uniform() > MNIST.CUTOUT_PROB: return image
+        if np.random.uniform() > MNIST.CUTOUT_PROB: return (image, mask)
         half_size = MNIST.CUTOUT_SIZE // 2
 
         left = np.random.randint(-half_size, image.shape[0] - half_size)
@@ -94,13 +95,14 @@ class MNIST:
         return (np.fliplr(image), np.fliplr(mask))
 
     @staticmethod
-    def translate(self, image, mask, amount=4):
+    def translate(image, mask, amount=4):
         top, left = np.random.randint(-amount, amount), np.random.randint(-amount, amount)
-        image = self._translate_image(image, top, left)
-        mask = self._translate_image(mask, top, left)
+        image = MNIST._translate_image(image, top, left)
+        mask = MNIST._translate_image(mask, top, left)
         return (image, mask)
 
-    def _translate_image(self, image, top, left):
+    @staticmethod
+    def _translate_image(image, top, left):
         clamp = lambda n: max(0, min(n, MNIST.H))
         translated = np.zeros((MNIST.H, MNIST.W, MNIST.C))
         translated[clamp(-top):clamp(-top + MNIST.H), clamp(-left):clamp(-left + MNIST.W), :] = \
