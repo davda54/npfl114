@@ -1,3 +1,12 @@
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
+# Pro segmentaci používáme U-Net architekturu, ve které je jako základ použit Wide-Res-Net.
+# U klasifikace se nakonec ukázalo vhodnější použít samostatnou WRN síť na vstupy zamaskované pomocí segmentační sítě
+# Regularizujeme augmentací vstupu (horizontální zrdcadlení a posunutí), label smoothingu, l2 a cutoutu
+# Výsledek je ensamble zhruba deseti nejlepších checkpointů
+
 import tensorflow as tf
 
 class IoUMetric(tf.metrics.MeanIoU):

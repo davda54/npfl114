@@ -2,6 +2,11 @@
 # 4d4a7a09-1d33-11e8-9de3-00505601122b
 # 80f6d138-1c94-11e8-9de3-00505601122b
 
+# Pro segmentaci používáme U-Net architekturu, ve které je jako základ použit Wide-Res-Net.
+# U klasifikace se nakonec ukázalo vhodnější použít samostatnou WRN síť na vstupy zamaskované pomocí segmentační sítě
+# Regularizujeme augmentací vstupu (horizontální zrdcadlení a posunutí), label smoothingu, l2 a cutoutu
+# Výsledek je ensamble zhruba deseti nejlepších checkpointů
+
 import numpy as np
 import tensorflow as tf
 import math
@@ -15,7 +20,7 @@ tf.config.threading.set_intra_op_parallelism_threads(4)
 
 from mnist_augmented import MNIST
 
-
+             
 class WideResNet(tf.keras.Model):
     def __init__(self, depth, width_factor, weight_decay):
         self.depth = depth
@@ -37,14 +42,14 @@ class WideResNet(tf.keras.Model):
             epochs=num_epochs,
             validation_data=data.dev.batches(batch_size),
             validation_steps=math.ceil(data.dev.size / batch_size),
-            callbacks=[tf.keras.callbacks.ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True,
-                                                          save_weights_only=True)]
+            callbacks=[tf.keras.callbacks.ModelCheckpoint(checkpoint_path, monitor='val_accuracy',                                                         save_weights_only=True)],
+            verbose=2
         )
 
     def predict_augmented(self, input, augmentation_loops):
         labels = []
         for image in input:
-            ensamble = [MNIST.horizontal_flip(MNIST.translate(image, amount=4)) for _ in range(augmentation_loops)]
+            ensamble = [MNIST.horizontal_flip(MNIST.translate(image, amount=1)) for _ in range(augmentation_loops)]
             predictions = tf.nn.softmax(self.predict(np.array(ensamble)))
             labels.append(np.sum(predictions, axis=0))
 

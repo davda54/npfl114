@@ -2,6 +2,11 @@
 # 4d4a7a09-1d33-11e8-9de3-00505601122b
 # 80f6d138-1c94-11e8-9de3-00505601122b
 
+# Pro segmentaci používáme U-Net architekturu, ve které je jako základ použit Wide-Res-Net.
+# U klasifikace se nakonec ukázalo vhodnější použít samostatnou WRN síť na vstupy zamaskované pomocí segmentační sítě
+# Regularizujeme augmentací vstupu (horizontální zrdcadlení a posunutí), label smoothingu, l2 a cutoutu
+# Výsledek je ensamble zhruba deseti nejlepších checkpointů
+
 import numpy as np
 import tensorflow as tf
 import math
@@ -16,7 +21,7 @@ tf.config.threading.set_intra_op_parallelism_threads(4)
 from mnist_augmented_masks import MNIST
 from iou_metric import IoUMetric
 
-class WideResNet(tf.keras.Model):
+class UWideResNet(tf.keras.Model):
     def __init__(self, depth, width_factor, weight_decay):
         self.depth = depth
         self.width_factor = width_factor

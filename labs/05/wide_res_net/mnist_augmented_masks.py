@@ -2,6 +2,11 @@
 # 4d4a7a09-1d33-11e8-9de3-00505601122b
 # 80f6d138-1c94-11e8-9de3-00505601122b
 
+# Pro segmentaci používáme U-Net architekturu, ve které je jako základ použit Wide-Res-Net.
+# U klasifikace se nakonec ukázalo vhodnější použít samostatnou WRN síť na vstupy zamaskované pomocí segmentační sítě
+# Regularizujeme augmentací vstupu (horizontální zrdcadlení a posunutí), label smoothingu, l2 a cutoutu
+# Výsledek je ensamble zhruba deseti nejlepších checkpointů
+
 import os
 import sys
 import urllib.request
@@ -51,15 +56,19 @@ class MNIST:
                     batch_perm = permutation[:batch_size]
                     permutation = permutation[batch_size:]
 
-                    images = self._data["images"][batch_perm]
                     labels = self._data["labels"][batch_perm]
-                    masks = self._data["masks"][batch_perm]
-
                     if self._use_augmentation:
-                        images, masks = zip(*([MNIST.augment(i, m) for i,m in zip(images, masks)]))
-                        images, masks = np.array(images), np.array(masks)
+                        images = []
+                        masks = []
+                        for t in zip(self._data["images"][batch_perm], self._data["masks"][batch_perm]):
+                            ai, am = MNIST.augment(*t)
+                            images.append(ai)
+                            masks.append(am)
+                    else:
+                        images = self._data["images"][batch_perm]
+                        masks = self._data["masks"][batch_perm]
 
-                    yield (images, [labels, masks])
+                    yield (np.array(images), {'class_output': labels, 'mask_output': np.array(masks)})
 
 
     def __init__(self, sparse_labels=True):

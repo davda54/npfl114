@@ -2,6 +2,11 @@
 # 4d4a7a09-1d33-11e8-9de3-00505601122b
 # 80f6d138-1c94-11e8-9de3-00505601122b
 
+# Pro segmentaci používáme U-Net architekturu, ve které je jako základ použit Wide-Res-Net.
+# U klasifikace se nakonec ukázalo vhodnější použít samostatnou WRN síť na vstupy zamaskované pomocí segmentační sítě
+# Regularizujeme augmentací vstupu (horizontální zrdcadlení a posunutí), label smoothingu, l2 a cutoutu
+# Výsledek je ensamble zhruba deseti nejlepších checkpointů
+
 import os
 import sys
 import urllib.request
@@ -60,11 +65,12 @@ class MNIST:
                     yield (images, labels)
 
 
-    def __init__(self, sparse_labels=True):
-        path = os.path.basename(self._URL)
-        if not os.path.exists(path):
-            print("Downloading FashionMasks dataset...", file=sys.stderr)
-            urllib.request.urlretrieve(self._URL, filename=path)
+    def __init__(self, sparse_labels=True, path=None):
+        if path is None:
+            path = os.path.basename(self._URL)
+            if not os.path.exists(path):
+                print("Downloading FashionMasks dataset...", file=sys.stderr)
+                urllib.request.urlretrieve(self._URL, filename=path)
 
         fashion_masks = np.load(path)
         for dataset in ["train", "dev", "test"]:
