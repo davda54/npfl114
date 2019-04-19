@@ -37,9 +37,9 @@ class Network:
 
         # TODO(cle_rnn): Concatenate the WE and CLE embeddings (in this order).
 
-        # TODO(we): Create specified `args.rnn_cell` RNN cell with dimension `args.rnn_cell_dim`
-        # and apply it in a bidirectional way on the embedded words, concatenating
-        # opposite directions.
+        # TODO: Create specified `args.rnn_cell` RNN cell (LSTM, GRU) with
+        # dimension `args.rnn_cell_dim` and apply it in a bidirectional way on
+        # the embedded words, concatenating opposite directions.
 
         # TODO(we): Add a softmax classification layer into `num_tags` classes, storing
         # the outputs in `predictions`.
@@ -53,7 +53,8 @@ class Network:
         #  - "accuracy", which is suitable accuracy
         self._writer = tf.summary.create_file_writer(args.logdir, flush_millis=10 * 1000)
 
-    @tf.function
+    @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 3,
+                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32)])
     def train_batch(self, inputs, tags):
         # TODO(cle_rnn): Generate a mask from `tags` containing ones in positions
         # where tags are nonzero (using `tf.not_equal`).
@@ -78,7 +79,8 @@ class Network:
             self.train_batch([batch[dataset.FORMS].word_ids, batch[dataset.FORMS].charseq_ids, batch[dataset.FORMS].charseqs],
                              batch[dataset.TAGS].word_ids)
 
-    @tf.function
+    @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 3,
+                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32)])
     def evaluate_batch(self, inputs, tags):
         # TODO(cle_rnn): Again generate a mask from `tags` containing ones in positions
         # where tags are nonzero (using `tf.not_equal`).
@@ -129,8 +131,8 @@ if __name__ == "__main__":
     np.random.seed(42)
     tf.random.set_seed(42)
     if args.recodex:
-        tf.keras.utils.get_custom_objects()["glorot_uniform"] = lambda: tf.keras.initializers.glorot_uniform(seed=42)
-        tf.keras.utils.get_custom_objects()["orthogonal"] = lambda: tf.keras.initializers.orthogonal(seed=42)
+        tf.keras.utils.get_custom_objects()["glorot_uniform"] = lambda: tf.initializers.glorot_uniform(seed=42)
+        tf.keras.utils.get_custom_objects()["orthogonal"] = lambda: tf.initializers.orthogonal(seed=42)
         tf.keras.utils.get_custom_objects()["uniform"] = lambda: tf.initializers.RandomUniform(seed=42)
     tf.config.threading.set_inter_op_parallelism_threads(args.threads)
     tf.config.threading.set_intra_op_parallelism_threads(args.threads)
