@@ -3,42 +3,58 @@ import sys
 import math
 import numpy as np
 import tensorflow as tf
-import tensorflow_hub as tfhub # Note: you need to install tensorflow_hub
+import tensorflow_hub as tfhub
 
-from caltech42_crossvalidation import Caltech42, center_crop
+from caltech42_crossvalidation import Caltech42
+import caltech42_augmentor as aug
 
 tf.config.gpu.set_per_process_memory_growth(True)
 tf.config.threading.set_inter_op_parallelism_threads(4)
 tf.config.threading.set_intra_op_parallelism_threads(4)
 
 
+class SpickaNet(tf.keras.Sequential):
+    def __init__(self):
+        super(SpickaNet, self).__init__([
+            tf.keras.layers.Dropout(0.5),
+            tf.keras.layers.Dense(256, activation=tf.nn.relu),
+            tf.keras.layers.Dropout(0.5),
+            tf.keras.layers.Dense(Caltech42.LABELS, activation=None)
+        ])
+
+
 class Network:
     def __init__(self, args):
+        
         self.models = []
+        self.spickas = []
+        
         for _ in range(args.folds):
             x = inputs = tf.keras.Input(shape=(224, 224, 3), dtype=tf.float32)
             x = tfhub.KerasLayer("https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2", output_shape=[1280], trainable=False)(x, training=False)
-            x = tf.keras.layers.Dropout(0.5)(x)
-            #x = tf.keras.layers.Dense(12, activation=tf.nn.relu)(x)
-            x = tf.keras.layers.Dense(Caltech42.LABELS, activation=None)(x)
+            
+            spicka = SpickaNet()
+            x = spicka(x)
         
             model = tf.keras.Model(inputs=inputs, outputs=x)
             self.models.append(model)
-        
+            self.spickas.append(spicka)        
 
     def train(self, caltech42, args):
         for i, model in enumerate(self.models):
             train_step = caltech42.folds[i].train.batched_size(args.batch_size)
             learning_rate = tf.optimizers.schedules.PiecewiseConstantDecay(
-                [10.0*train_step, 20.0*train_step, 30.0*train_step],
-                [0.1, 0.05, 0.01, 0.005]
+                [60.0*train_step, 120.0*train_step, 180.0*train_step],
+                [0.003, 0.0003, 0.0001, 0.00001]
             )
             model.compile(
-                tf.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True),
+                #tf.optimizers.SGD(learning_rate=0.1),
+                tf.optimizers.Adam(learning_rate=learning_rate),
                 loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=0.1),
                 metrics=[tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
             )            
             
+        best_acc = 0
         for i in range(args.epochs):
             accuracy_train = accuracy_test = 0
             for idx, dataset in enumerate(caltech42.folds):
@@ -61,8 +77,14 @@ class Network:
                 )
                 
                 accuracy_test += test_logs[self.models[idx].metrics_names.index("accuracy")]
-                print("\repoch {:2d} | fold {:2d}/{} | train acc: {:.3f} % | test acc: {:.3f} %".format(i+1, idx+1, args.folds, 100*accuracy_train/(idx+1), 100*accuracy_test/(idx+1)), end='')
-            print()
+                print("\repoch {:2d} | fold {:2d}/{} | train acc: {:.3f} % | test acc: {:.3f} %".format(i+1, idx+1, args.folds, 100*accuracy_train/(idx+1), 100*accuracy_test/(idx+1)), end='', flush=True)
+                
+            if accuracy_test/args.folds > best_acc:
+                best_acc = accuracy_test/args.folds
+                for i, spicka in enumerate(self.spickas):
+                    spicka.save_weights("models/acc-{}_fold-{}".format(best_acc, i))
+
+            print(" | best acc: {:.3f}".format(100*best_acc), flush=True)
 
     def predict(self, caltech42, args):
         return self.model.predict_generator(
@@ -78,8 +100,8 @@ if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", default=16, type=int, help="Batch size.")
-    parser.add_argument("--epochs", default=100, type=int, help="Number of epochs.")
+    parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
+    parser.add_argument("--epochs", default=200, type=int, help="Number of epochs.")
     parser.add_argument("--threads", default=5, type=int, help="Maximum number of threads to use.")
     parser.add_argument("--folds", default=10, type=int, help="Number of crossvalidation folds.")
     args = parser.parse_args()
@@ -101,7 +123,7 @@ if __name__ == "__main__":
     args.checkpoint_path = os.path.join(checkpoint_dir, "{val_acc:.4f}")
 
     # Load data
-    caltech42 = Caltech42(center_crop, center_crop, sparse_labels=False, folds=args.folds)
+    caltech42 = Caltech42(aug.augment, aug.center_crop, sparse_labels=False, folds=args.folds)
 
     # Create the network and train
     network = Network(args)

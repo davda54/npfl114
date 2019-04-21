@@ -2,6 +2,7 @@
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda
 from morpho_dataset import MorphoDataset
 
 class Network:
@@ -9,12 +10,15 @@ class Network:
         # TODO(we): Implement a one-layer RNN network. The input
         # `word_ids` consists of a batch of sentences, each
         # a sequence of word indices. Padded words have index 0.
+        word_ids = tf.keras.Input(shape=[None], dtype=tf.int32)
 
         # TODO: Apart from `word_ids`, RNN CLEs utilize two more
         # inputs, `charseqs` containing unique words in batches (each word
         # being a sequence of character indices, padding characters again
         # have index 0) and `charseq_ids` with the same shape as `word_ids`,
         # but with indices pointing into `charseqs`.
+        charseqs = tf.keras.Input(shape=[None], dtype=tf.int32)
+        charseq_ids = tf.keras.Input(shape=[None], dtype=tf.int32)
 
         # TODO: Embed the characters in `charseqs` using embeddings of size
         # `args.cle_dim`, masking zero indices. Then, pass the embedded characters
@@ -27,18 +31,28 @@ class Network:
         # of the matrix. You need to wrap the `tf.gather` in `tf.keras.layers.Lambda`
         # because of a bug [fixed 6 days ago in the master], so the call shoud look like
         # `tf.keras.layers.Lambda(lambda args: tf.gather(*args))(...)`
+        chars_embedded = Embedding(input_dim=num_chars, output_dim=args.cle_dim, mask_zero=False)(charseqs)
+        chars_hidden = Bidirectional(GRU(units=args.cle_dim, return_sequences=False))(chars_embedded)
+        words_embedded_1 = Lambda(lambda args: tf.gather(*args))([chars_hidden, charseq_ids])
 
         # TODO(we): Embed input words with dimensionality `args.we_dim`, using
         # `mask_zero=True`.
+        words_embedded_2 = Embedding(input_dim=num_words, output_dim=args.we_dim, mask_zero=False)(word_ids)
 
         # TODO: Concatenate the WE and CLE embeddings (in this order).
+        embedded = tf.concat([words_embedded_2, words_embedded_1], 2)
 
         # todo(we): create specified `args.rnn_cell` rnn cell (lstm, gru) with
         # dimension `args.rnn_cell_dim` and apply it in a bidirectional way on
         # the embedded words, concatenating opposite directions.
+        if args.rnn_cell == 'LSTM':
+            hidden = Bidirectional(LSTM(units=args.rnn_cell_dim, return_sequences=True))(embedded)
+        else:
+            hidden = Bidirectional(GRU(units=args.rnn_cell_dim, return_sequences=True))(embedded)
 
         # TODO(we): Add a softmax classification layer into `num_tags` classes, storing
         # the outputs in `predictions`.
+        predictions = Dense(units=num_tags, activation=tf.nn.softmax)(hidden)
 
         self.model = tf.keras.Model(inputs=[word_ids, charseq_ids, charseqs], outputs=predictions)
 
@@ -47,6 +61,10 @@ class Network:
         # TODO: Create two metrics in self._metrics dictionary:
         #  - "loss", which is tf.metrics.Mean()
         #  - "accuracy", which is suitable accuracy
+        self._optimizer = tf.optimizers.Adam()
+        self._loss = tf.losses.SparseCategoricalCrossentropy()
+        self._metrics = {"loss": tf.metrics.Mean(), "accuracy": tf.metrics.SparseCategoricalAccuracy()}
+
         self._writer = tf.summary.create_file_writer(args.logdir, flush_millis=10 * 1000)
 
     @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 3,
@@ -54,10 +72,15 @@ class Network:
     def train_batch(self, inputs, tags):
         # TODO: Generate a mask from `tags` containing ones in positions
         # where tags are nonzero (using `tf.not_equal`).
+        mask = tf.not_equal(tags, 0)
+
         with tf.GradientTape() as tape:
             probabilities = self.model(inputs, training=True)
+
             # TODO: Compute `loss` using `self._loss`, passing the generated
             # tag mask as third parameter.
+            loss = self._loss(tags, probabilities, mask)
+
         gradients = tape.gradient(loss, self.model.variables)
         self._optimizer.apply_gradients(zip(gradients, self.model.variables))
 
@@ -65,9 +88,12 @@ class Network:
         with self._writer.as_default():
             for name, metric in self._metrics.items():
                 metric.reset_states()
+
+                # TODO: Update the `metric` using gold `tags` and generated `probabilities`,
+                # passing the tag mask as third argument.
                 if name == "loss": metric(loss)
-                else: # TODO: Update the `metric` using gold `tags` and generated `probabilities`,
-                      # passing the tag mask as third argument.
+                else: metric.update_state(tags, probabilities, mask)
+
                 tf.summary.scalar("train/{}".format(name), metric.result())
 
     def train_epoch(self, dataset, args):
@@ -80,19 +106,29 @@ class Network:
     def evaluate_batch(self, inputs, tags):
         # TODO: Again generate a mask from `tags` containing ones in positions
         # where tags are nonzero (using `tf.not_equal`).
+        mask = tf.not_equal(tags, 0)
+
         probabilities = self.model(inputs, training=False)
+
         # TODO: Compute `loss` using `self._loss`, passing the generated
         # tag mask as third parameter.
+        loss = self._loss(tags, probabilities, mask)
+
         for name, metric in self._metrics.items():
+            # TODO: Update the `metric` using gold `tags` and generated `probabilities`,
+            # passing the tag mask as third argument.
             if name == "loss": metric(loss)
-            else: # TODO: Update the `metric` using gold `tags` and generated `probabilities`,
-                  # passing the tag mask as third argument.
+            else: metric.update_state(tags, probabilities, mask)
+
 
     def evaluate(self, dataset, dataset_name, args):
         for metric in self._metrics.values():
             metric.reset_states()
         for batch in dataset.batches(args.batch_size):
+
             # TODO: Evaluate the given match, using the same inputs as in training.
+            self.evaluate_batch([batch[dataset.FORMS].word_ids, batch[dataset.FORMS].charseq_ids, batch[dataset.FORMS].charseqs],
+                                 batch[dataset.TAGS].word_ids)
 
         metrics = {name: metric.result() for name, metric in self._metrics.items()}
         with self._writer.as_default():
