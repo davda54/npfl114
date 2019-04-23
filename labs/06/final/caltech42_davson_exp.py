@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
 import sys
 import math
 import numpy as np
@@ -17,8 +22,8 @@ class SpickaNet(tf.keras.Sequential):
     def __init__(self):
         super(SpickaNet, self).__init__([
             tf.keras.layers.Dropout(0.5),
-            tf.keras.layers.Dense(256, activation=tf.nn.relu),
-            tf.keras.layers.Dropout(0.5),
+            #tf.keras.layers.Dense(256, activation=tf.nn.relu),
+            #tf.keras.layers.Dropout(0.5),
             tf.keras.layers.Dense(Caltech42.LABELS, activation=None)
         ])
 
@@ -29,11 +34,12 @@ class Network:
         self.models = []
         self.spickas = []
         
-        for _ in range(args.folds):
+        for fold in range(args.folds):
             x = inputs = tf.keras.Input(shape=(224, 224, 3), dtype=tf.float32)
             x = tfhub.KerasLayer("https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2", output_shape=[1280], trainable=False)(x, training=False)
             
             spicka = SpickaNet()
+            #spicka.load_weights(args.model_path.format(fold))
             x = spicka(x)
         
             model = tf.keras.Model(inputs=inputs, outputs=x)
@@ -44,12 +50,12 @@ class Network:
         for i, model in enumerate(self.models):
             train_step = caltech42.folds[i].train.batched_size(args.batch_size)
             learning_rate = tf.optimizers.schedules.PiecewiseConstantDecay(
-                [60.0*train_step, 120.0*train_step, 180.0*train_step],
-                [0.003, 0.0003, 0.0001, 0.00001]
+                [30.0*train_step, 120.0*train_step, 180.0*train_step],
+                [0.0003, 0.00003, 0.00001, 0.00001]
             )
             model.compile(
-                #tf.optimizers.SGD(learning_rate=0.1),
-                tf.optimizers.Adam(learning_rate=learning_rate),
+                tf.optimizers.SGD(learning_rate=0.1),
+                #tf.optimizers.Adam(learning_rate=learning_rate),
                 loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=0.1),
                 metrics=[tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
             )            
@@ -82,7 +88,7 @@ class Network:
             if accuracy_test/args.folds > best_acc:
                 best_acc = accuracy_test/args.folds
                 for i, spicka in enumerate(self.spickas):
-                    spicka.save_weights("models/acc-{}_fold-{}".format(best_acc, i))
+                    spicka.save_weights("models/acc-{}_fold-{}-simple".format(best_acc, i))
 
             print(" | best acc: {:.3f}".format(100*best_acc), flush=True)
 
@@ -101,6 +107,7 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
+    parser.add_argument("--model_path", default='models/acc-0.9640958189964295_fold-{}', type=str)
     parser.add_argument("--epochs", default=200, type=int, help="Number of epochs.")
     parser.add_argument("--threads", default=5, type=int, help="Maximum number of threads to use.")
     parser.add_argument("--folds", default=10, type=int, help="Number of crossvalidation folds.")

@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
+
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
+import sys
 import numpy as np
 import tensorflow as tf
 import tensorflow_hub as tfhub # Note: you need to install tensorflow_hub
 
 from caltech42_crossvalidation import Caltech42, center_crop
 
-# The neural network model
+tf.config.gpu.set_per_process_memory_growth(True)
+tf.config.threading.set_inter_op_parallelism_threads(4)
+tf.config.threading.set_intra_op_parallelism_threads(4)
+
+
 class Network:
     def __init__(self, args):
         self.models = []
@@ -42,9 +52,8 @@ class Network:
                     verbose=0
                 )
                 accuracy_test += test_logs[self.models[idx].metrics_names.index("accuracy")]
-            accuracy_test /= len(caltech42.folds)
-            accuracy_train /= len(caltech42.folds)
-            print("Epoch {} train acc: {}, test acc: {}".format(i + 1, accuracy_train, accuracy_test))
+                print("\repoch {:2d} | fold {:2d}/{} | train acc: {:.3f} % | test acc: {:.3f} %".format(i+1, idx+1, args.folds, 100*accuracy_train/(idx+1), 100*accuracy_test/(idx+1)), end='')
+            print()
 
     def predict(self, caltech42, args):
         return self.model.predict_generator(

@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
 import os
 import sys
 import urllib.request
@@ -85,12 +91,12 @@ class Caltech42:
                     for i, index in enumerate(batch_perm):
                         data = self._transformation(self._data["images"][index].copy())
 
-                        if type(data) != np.ndarray:
-                            raise ValueError("Caltech42: Expecting images after `transformation` to be Numpy `ndarray`")
-                        if data.dtype != np.float32 or data.shape != (Caltech42.MIN_SIZE, Caltech42.MIN_SIZE, Caltech42.C):
-                            raise ValueError(
-                                "Caltech42: Expecting images after `transformation` to have shape {} and dtype {}".format(
-                                    (Caltech42.MIN_SIZE, Caltech42.MIN_SIZE, Caltech42.C), np.float32))
+#                         if type(data) != np.ndarray:
+#                             raise ValueError("Caltech42: Expecting images after `transformation` to be Numpy `ndarray`")
+#                         if data.dtype != np.float32 or data.shape != (Caltech42.MIN_SIZE, Caltech42.MIN_SIZE, Caltech42.C):
+#                             raise ValueError(
+#                                 "Caltech42: Expecting images after `transformation` to have shape {} and dtype {}".format(
+#                                     (Caltech42.MIN_SIZE, Caltech42.MIN_SIZE, Caltech42.C), np.float32))
                         X[i] = data
 
                     y = self._data["labels"][batch_perm]
@@ -100,7 +106,7 @@ class Caltech42:
                 if not repeat:
                     break
 
-    def __init__(self, augmentation, preprocessing, folds, sparse_labels=True):
+    def __init__(self, augmentation, preprocessing, folds, sparse_labels=True, preserve_dev=False):
         """
         Parameters
         ----------
@@ -117,7 +123,7 @@ class Caltech42:
         if not os.path.exists(path):
             print("Downloading Caltech42 dataset...", file=sys.stderr)
             urllib.request.urlretrieve(self._URL, filename=path)
-
+            
         with zipfile.ZipFile(path, "r") as caltech42_zip:
             for dataset in ["train", "dev", "test"]:
                 data = {"images": [], "labels": []}
@@ -140,9 +146,12 @@ class Caltech42:
                 setattr(self, dataset, data)
 
         self.test = self.Dataset(self.test, preprocessing, shuffle_batches=False)
-        self.train["images"] += self.dev["images"]
-        self.train["labels"] = np.concatenate((self.train["labels"], self.dev["labels"]))
-        del self.dev
+        if not preserve_dev:
+            self.train["images"] += self.dev["images"]
+            self.train["labels"] = np.concatenate((self.train["labels"], self.dev["labels"]))
+            del self.dev
+        else:
+            self.dev = Caltech42.Dataset(self.dev, preprocessing, shuffle_batches=False)
 
         label_indices = []
         for label in range(Caltech42.LABELS):
@@ -182,7 +191,3 @@ class Caltech42:
         for _ in range(groups):
             yield int(s+d) - int(s)
             s += d
-
-def center_crop(image):
-    t, l = (np.asarray(image.shape[:2]) - Caltech42.MIN_SIZE) // 2
-    return image[t:(t + Caltech42.MIN_SIZE), l:(l + Caltech42.MIN_SIZE), :Caltech42.C]

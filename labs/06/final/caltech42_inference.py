@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
 import sys
 import math
 import numpy as np
@@ -42,17 +47,42 @@ class Network:
             self.spickas.append(spicka)        
 
     def test(self, caltech42, args):
-        accuracy = 0.0
-        for idx, dataset in enumerate(caltech42.folds):
-            test_logs = self.models[idx].evaluate_generator(
-                generator=dataset.dev.batches(args.batch_size, repeat=False),
-                steps=dataset.dev.batched_size(args.batch_size),
-                verbose=0
+        for i, model in enumerate(self.models):
+            train_step = caltech42.folds[i].train.batched_size(args.batch_size)
+            learning_rate = tf.optimizers.schedules.PiecewiseConstantDecay(
+                [60.0*train_step, 120.0*train_step, 180.0*train_step],
+                [0.003, 0.0003, 0.0001, 0.00001]
+            )
+            model.compile(
+                #tf.optimizers.SGD(learning_rate=0.1),
+                tf.optimizers.Adam(learning_rate=learning_rate),
+                loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=0.1),
+                metrics=[tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
             )
 
-            accuracy += test_logs[self.models[idx].metrics_names.index("accuracy")]
+        accuracy = 0.0
+        m = np.zeros((42,42))
+        false_labels = 42*[0]
+        for idx, dataset in enumerate(caltech42.folds):
+            total, correct = 0, 0
+            for i in range(dataset.dev.size):
+                image, label = dataset.dev.data["images"][i], np.argmax(dataset.dev.data["labels"][i])
+                batch, weights = aug.create_inference_augmented_batch(image)
+                
+                probabilities = tf.nn.softmax(self.models[idx].predict(batch))
+                probabilities = np.sum(probabilities*tf.expand_dims(weights, 1), axis=0)
+                prediction = np.argmax(probabilities)
+                
+                total += 1
+                if prediction == label: correct += 1
+                m[prediction, label] += 1
+
+            accuracy += correct / total
+            print(accuracy / (idx + 1))
 
         print(accuracy / args.folds)
+        
+        np.savetxt("matrix.csv", m, delimiter=",")
 
     def predict(self, caltech42, args):
         return self.model.predict_generator(
@@ -66,7 +96,7 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=64, type=int, help="Batch size.")
-    parser.add_argument("--model_path", default='models/acc-0.9640958189964295_fold-{}', type=str)
+    parser.add_argument("--model_path", default='models/acc-0.9635594666004181_fold-{}', type=str)
     parser.add_argument("--epochs", default=200, type=int, help="Number of epochs.")
     parser.add_argument("--threads", default=5, type=int, help="Maximum number of threads to use.")
     parser.add_argument("--folds", default=10, type=int, help="Number of crossvalidation folds.")

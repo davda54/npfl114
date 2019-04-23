@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# 41729eed-1c9d-11e8-9de3-00505601122b
+# 4d4a7a09-1d33-11e8-9de3-00505601122b
+# 80f6d138-1c94-11e8-9de3-00505601122b
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_hub as tfhub # Note: you need to install tensorflow_hub

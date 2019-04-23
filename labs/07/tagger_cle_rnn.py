@@ -2,7 +2,7 @@
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda
+from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda, concatenate
 from morpho_dataset import MorphoDataset
 
 class Network:
@@ -31,16 +31,16 @@ class Network:
         # of the matrix. You need to wrap the `tf.gather` in `tf.keras.layers.Lambda`
         # because of a bug [fixed 6 days ago in the master], so the call shoud look like
         # `tf.keras.layers.Lambda(lambda args: tf.gather(*args))(...)`
-        chars_embedded = Embedding(input_dim=num_chars, output_dim=args.cle_dim, mask_zero=False)(charseqs)
+        chars_embedded = Embedding(input_dim=num_chars, output_dim=args.cle_dim, mask_zero=True)(charseqs)
         chars_hidden = Bidirectional(GRU(units=args.cle_dim, return_sequences=False))(chars_embedded)
         words_embedded_1 = Lambda(lambda args: tf.gather(*args))([chars_hidden, charseq_ids])
 
         # TODO(we): Embed input words with dimensionality `args.we_dim`, using
         # `mask_zero=True`.
-        words_embedded_2 = Embedding(input_dim=num_words, output_dim=args.we_dim, mask_zero=False)(word_ids)
+        words_embedded_2 = Embedding(input_dim=num_words, output_dim=args.we_dim, mask_zero=True)(word_ids)
 
         # TODO: Concatenate the WE and CLE embeddings (in this order).
-        embedded = tf.concat([words_embedded_2, words_embedded_1], 2)
+        embedded = concatenate([words_embedded_2, words_embedded_1], axis=2)
 
         # todo(we): create specified `args.rnn_cell` rnn cell (lstm, gru) with
         # dimension `args.rnn_cell_dim` and apply it in a bidirectional way on
