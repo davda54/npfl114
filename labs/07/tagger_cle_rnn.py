@@ -42,7 +42,7 @@ class Network:
         # TODO: Concatenate the WE and CLE embeddings (in this order).
         embedded = concatenate([words_embedded_2, words_embedded_1], axis=2)
 
-        # todo(we): create specified `args.rnn_cell` rnn cell (lstm, gru) with
+        # TODO(we): Create specified `args.rnn_cell` rnn cell (LSTM, GRU) with
         # dimension `args.rnn_cell_dim` and apply it in a bidirectional way on
         # the embedded words, concatenating opposite directions.
         if args.rnn_cell == 'LSTM':
