@@ -72,3 +72,4 @@ labs/.idea/httpRequests
 # Android studio 3.1+ serialized cache file
 labs/.idea/caches/build_file_checksums.ser
 labs/03/parameters_log_new.json
+labs/07/timit_mfcc.pickle
