@@ -73,3 +73,4 @@ labs/.idea/httpRequests
 labs/.idea/caches/build_file_checksums.ser
 labs/03/parameters_log_new.json
 labs/07/timit_mfcc.pickle
+labs/07/speech recognition/test_predict_cleaned.txt

@@ -16,8 +16,8 @@ def edit_distance(x, y):
     return a[-1][-1]
 
 parser = argparse.ArgumentParser()
-parser.add_argument("system", type=str, help="Path to system output.")
-parser.add_argument("gold", type=str, help="Path to gold data.")
+parser.add_argument("--system", default='speech_recognition_dev.txt', type=str, help="Path to system output.")
+parser.add_argument("--gold", default='timit_mfcc_dev_gold.txt', type=str, help="Path to gold data.")
 args = parser.parse_args()
 
 with open(args.system, "r", encoding="utf-8") as system_file:

@@ -2,10 +2,12 @@
 import contextlib
 
 import numpy as np
+import math
 import tensorflow as tf
-from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda, concatenate
+from tensorflow.keras.layers import Dense, concatenate, Lambda
+from tensorflow.keras.layers.experimental import LayerNormalization
 
-from timit_mfcc import TimitMFCC
+from timit_mfcc_position_encoding import TimitMFCC
 
 tf.config.gpu.set_per_process_memory_growth(True)
 
@@ -21,22 +23,66 @@ class Network:
         # where the `+ 1` is for the CTC blank symbol.
         #
         # Store the results in `self.model`.
-        hidden = input = tf.keras.Input(shape=[None, TimitMFCC.MFCC_DIM], dtype=tf.float32)
-
-        for _ in range(args.rnn_layers):
-            if args.rnn_cell == 'LSTM':
-                hidden = Bidirectional(LSTM(units=args.rnn_dim, return_sequences=True))(hidden)
-            elif args.rnn_cell == 'GRU':
-                hidden = Bidirectional(GRU(units=args.rnn_dim, return_sequences=True))(hidden)
-
-        predictions = Dense(units=len(TimitMFCC.LETTERS) + 1, activation=None)(hidden)
-
-        self.model = tf.keras.Model(inputs=input, outputs=predictions)
+        self.build()
 
         # The following are just defaults, do not hesitate to modify them.
         self._optimizer = tf.optimizers.Adam()
         self._metrics = {"loss": tf.metrics.Mean(), "edit_distance": tf.metrics.Mean()}
         self._writer = tf.summary.create_file_writer(args.logdir, flush_millis=10 * 1000)
+
+    def build(self):
+        self.scale = tf.constant(math.sqrt(args.dim / args.heads))
+
+        x = input = tf.keras.Input(shape=[None, TimitMFCC.MFCC_DIM], dtype=tf.float32)
+        positional_encoding = tf.keras.Input(shape=[None, args.dim], dtype=tf.float32)
+
+        x = Dense(args.dim, activation=None)(x)
+        x += positional_encoding
+
+        for _ in range(args.layers):
+           x = self.layer(x)
+
+        predictions = Dense(units=len(TimitMFCC.LETTERS) + 1, activation=None)(x)
+        self.model = tf.keras.Model(inputs=[input, positional_encoding], outputs=predictions)
+
+    def layer(self, x):
+        attentioned = self.fast_attention(x)
+        x = LayerNormalization(epsilon=1e-6)(tf.keras.layers.add([x, attentioned]))
+
+        forwarded = Dense(4*args.dim, activation=tf.nn.relu)(x)
+        forwarded = Dense(args.dim, activation=None)(forwarded)
+        return LayerNormalization(epsilon=1e-6)(tf.keras.layers.add([x, forwarded]))
+
+    def fast_attention(self, x):
+        values = Dense(3*args.dim, activation=None)(x)
+        values = Lambda(lambda x: tf.reshape(x, (tf.shape(x)[0], -1, args.heads, 3*args.dim // args.heads)))(values)
+        values = Lambda(lambda x: tf.transpose(x, perm=[0, 2, 1, 3]))(values)
+        Q, K, V = Lambda(lambda x: tf.split(x, 3, axis=3))(values)
+
+        indices = Lambda(lambda qk: tf.linalg.matmul(qk[0], qk[1], transpose_b=True) / self.scale)([Q, K])
+        indices = Lambda(lambda x: tf.nn.softmax(x))(indices)
+        combined = Lambda(lambda iv: tf.linalg.matmul(iv[0], iv[1]))([indices, V])
+
+        concat = Lambda(lambda c: tf.transpose(c, perm=[0, 2, 1, 3]))(combined)
+        concat = Lambda(lambda c: tf.reshape(c, (tf.shape(c)[0], -1, args.dim)))(concat)
+
+        return Dense(args.dim, activation=None)(concat)
+
+    def slow_attention(self, x):
+        heads = []
+        for _ in range(args.heads):
+            heads.append(self.attention_head(x))
+        concatenated = concatenate(heads, axis=2)
+        return Dense(args.dim, activation=None)(concatenated)
+
+    def attention_head(self, x):
+        Q = Dense(args.dim // args.heads)(x)
+        K = Dense(args.dim // args.heads)(x)
+        V = Dense(args.dim // args.heads)(x)
+
+        indices = tf.linalg.matmul(Q, K, transpose_b=True)
+        indices = tf.nn.softmax(indices / self.scale)
+        return tf.linalg.matmul(indices, V)
 
     # Converts given tensor with `0` values for padding elements, create
     # a SparseTensor.
@@ -53,8 +99,8 @@ class Network:
     # Compute logits given input mfcc, mfcc_lens and training flags.
     # Also transpose the logits to `[time_steps, batch, dimension]` shape
     # which is required by the following CTC operations.
-    def _compute_logits(self, mfcc, mfcc_lens, training):
-        logits = self.model(mfcc, mask=tf.sequence_mask(mfcc_lens), training=training)
+    def _compute_logits(self, mfcc, positional_encoding, training):
+        logits = self.model([mfcc, positional_encoding], training=training)
         return tf.transpose(logits, [1, 0, 2])
 
     # Compute CTC loss using given logits, their lengths, and sparse targets.
@@ -76,12 +122,13 @@ class Network:
 
     @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, TimitMFCC.MFCC_DIM], dtype=tf.float32),
                                   tf.TensorSpec(shape=[None], dtype=tf.int32),
-                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32)])
-    def train_batch(self, mfcc, mfcc_lens, targets):
+                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32),
+                                  tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)])
+    def train_batch(self, mfcc, mfcc_lens, targets, positional_encoding):
         sparse_targets = self._to_sparse(tf.cast(targets, dtype=tf.int32))
 
         with tf.GradientTape() as tape:
-            logits = self._compute_logits(mfcc, mfcc_lens, training=True)
+            logits = self._compute_logits(mfcc, positional_encoding, training=True)
             loss = self._ctc_loss(logits, mfcc_lens, sparse_targets)
 
         gradients = tape.gradient(loss, self.model.variables)
@@ -99,18 +146,19 @@ class Network:
         batches_num = dataset.size / args.batch_size
 
         for i, batch in enumerate(dataset.batches(args.batch_size)):
-            self.train_batch(batch["mfcc"], batch["mfcc_len"], batch["letters"])
+            self.train_batch(batch["mfcc"], batch["mfcc_len"], batch["letters"], batch["positional_encoding"])
 
             print(f'\repoch: {epoch:3d} | train loss: {self._metrics["loss"].result():3.2f} | train edit dist: {self._metrics["edit_distance"].result():.4f} | {int(i / batches_num * 100)} %', end='', flush=True)
         print(f'\repoch: {epoch:3d} | train loss: {self._metrics["loss"].result():3.2f} | train edit dist: {self._metrics["edit_distance"].result():.4f} | ', end='', flush=True)
 
     @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, TimitMFCC.MFCC_DIM], dtype=tf.float32),
                                   tf.TensorSpec(shape=[None], dtype=tf.int32),
-                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32)])
-    def evaluate_batch(self, mfcc, mfcc_lens, targets):
+                                  tf.TensorSpec(shape=[None, None], dtype=tf.int32),
+                                  tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)])
+    def evaluate_batch(self, mfcc, mfcc_lens, targets, positional_encoding):
         sparse_targets = self._to_sparse(targets)
 
-        logits = self._compute_logits(mfcc, mfcc_lens, training=True)
+        logits = self._compute_logits(mfcc, positional_encoding, training=False)
         self._edit_distance(self._ctc_predict(logits, mfcc_lens), sparse_targets)
 
     def evaluate(self, dataset, dataset_name, args):
@@ -118,13 +166,13 @@ class Network:
             metric.reset_states()
 
         for batch in dataset.batches(args.batch_size):
-            self.evaluate_batch(batch["mfcc"], batch["mfcc_len"], batch["letters"])
+            self.evaluate_batch(batch["mfcc"], batch["mfcc_len"], batch["letters"], batch["positional_encoding"])
 
         print(f'eval edit dist: {self._metrics["edit_distance"].result():.4f}', flush=True)
 
         if self._metrics["edit_distance"].result() < self.best_distance:
             self.best_distance = self._metrics["edit_distance"].result()
-            self.model.save_weights(f"models/{args.rnn_cell}-{args.rnn_layers}-{args.rnn_dim}_acc-{self.best_distance:.4f}")
+            #self.model.save_weights(f"models/{args.layers}-{args.dim}-{args.heads}_acc-{self.best_distance:.4f}")
 
     @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, TimitMFCC.MFCC_DIM], dtype=tf.float32),
                                   tf.TensorSpec(shape=[None], dtype=tf.int32)])
@@ -149,14 +197,14 @@ if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", default=8, type=int, help="Batch size.")
+    parser.add_argument("--batch_size", default=32, type=int, help="Batch size.")
     parser.add_argument("--ctc_beam", default=16, type=int, help="CTC beam.")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs.")
-    parser.add_argument("--rnn_dim", default=128, type=int, help="Size of LSTM layer.")
-    parser.add_argument("--rnn_cell", default="GRU", type=str, help="RNN cell type.")
-    parser.add_argument("--rnn_layers", default=3, type=int, help="number of RNN layers.")
+    parser.add_argument("--dim", default=256, type=int, help="Attention dimension.")
+    parser.add_argument("--layers", default=4, type=int, help="number of attention layers.")
+    parser.add_argument("--heads", default=8, type=int, help="number of attention heads.")
     parser.add_argument("--threads", default=4, type=int, help="Maximum number of threads to use.")
-    parser.add_argument("--clip_gradient", default='0.1', type=float)
+    parser.add_argument("--clip_gradient", default=None, type=float)
     args = parser.parse_args()
 
     # Fix random seeds and number of threads
@@ -173,7 +221,7 @@ if __name__ == "__main__":
     ))
 
     # Load the data
-    timit = TimitMFCC()
+    timit = TimitMFCC(args=args)
 
     # Create the network and train
     network = Network(args)
