@@ -3,6 +3,7 @@ import sys
 import urllib.request
 import zipfile
 
+from morpho_positional_dataset import MorphoDataset
 import numpy as np
 
 class MorphoAnalyzer:
@@ -23,7 +24,7 @@ class MorphoAnalyzer:
         def __repr__(self):
             return "(lemma: {}, tag: {})".format(self.lemma, self.tag)
 
-    def __init__(self, dataset):
+    def __init__(self, dataset, trainset):
         path = "{}.zip".format(dataset)
         if not os.path.exists(path):
             print("Downloading dataset {}...".format(dataset), file=sys.stderr)
@@ -41,5 +42,27 @@ class MorphoAnalyzer:
                         analyses.append(self.LemmaTag(columns[i], columns[i + 1]))
                     self.analyses[columns[0]] = analyses
 
+        self.tag_indices = {}
+        tag_map = [trainset.data[MorphoDataset.Dataset.TAGS_BEGIN + i].words_map for i in range(MorphoDataset.TAGS)]
+        word_map = trainset.data[0].words_map
+
+        for word, suggestions in self.analyses.items():
+            if word not in word_map: continue
+
+            tags = []
+            for suggestion in suggestions:
+                s = [tag for i, tag in enumerate(suggestion.tag) if i not in [12, 13]]
+                for i, tag in enumerate(s):
+                    if tag not in tag_map[i]: break
+                    s[i] = tag_map[i][tag] - 1
+                else:
+                    continue
+                tags.append(s)
+
+            self.tag_indices[word_map[word]] = tags
+
     def get(self, word):
         return self.analyses.get(word, [])
+
+    def get_tag_ids(self, word_id):
+        return self.tag_indices.get(word_id, [])
