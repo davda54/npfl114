@@ -25,7 +25,7 @@ from collections import Counter
 #       to the dataset alphabet.
 class MorphoDataset:
     _URL = "https://ufal.mff.cuni.cz/~straka/courses/npfl114/1819/datasets/"
-    TAGS = 12
+    TAGS = 11
     TAG_SIZES = [0] * TAGS
     TAG_RATIOS = [[]] * TAGS
 
@@ -61,8 +61,8 @@ class MorphoDataset:
         FORMS = 0
         LEMMAS = 1
         TAGS_BEGIN = 2
-        TAGS_END = 14
-        FACTORS = 14
+        TAGS_END = 13
+        FACTORS = 13
         EMBEDDING_SIZE = 256
 
         def __init__(self, data_file, dim, embedding_file, train=None, shuffle_batches=True, add_bow_eow=False, max_sentences=None, seed=42):
@@ -161,7 +161,7 @@ class MorphoDataset:
                 batch = []
                 max_sentence_len = max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm)
 
-                batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32), np.zeros([batch_size, max_sentence_len, 256], np.float32)))
+                batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32), np.zeros([batch_size, max_sentence_len, self.EMBEDDING_SIZE], np.float32)))
                 for i in range(batch_size):
                     batch[0].word_embeddings[i, :len(self._data[self.FORMS].word_embeddings[batch_perm[i]]),:] = self._data[self.FORMS].word_embeddings[batch_perm[i]]
                     batch[0].word_ids[i, :len(self._data[self.FORMS].word_ids[batch_perm[i]])] = self._data[self.FORMS].word_ids[batch_perm[i]]
@@ -212,30 +212,23 @@ class MorphoDataset:
             return pos_encoding[np.newaxis, ...]
 
 
-    def __init__(self, dataset, dim, add_bow_eow=False, max_sentences=None):
+    def __init__(self, directory, dataset, dim, add_bow_eow=False, max_sentences=None):
         path = "{}.zip".format(dataset)
-        if not os.path.exists(path):
-            print("Downloading dataset {}...".format(dataset), file=sys.stderr)
-            urllib.request.urlretrieve("{}/{}".format(self._URL, path), filename=path)
 
-        with zipfile.ZipFile(path, "r") as zip_file:
+        with zipfile.ZipFile(f"{directory}/{path}", "r") as zip_file:
             for dataset in ["train", "dev", "test"]:
-                with zip_file.open("{}_{}.txt".format(os.path.splitext(path)[0], dataset), "r") as dataset_file, \
-                    open("{}_words_embedded.txt".format(dataset), "r", encoding="utf-8") as embedding_file:
-                        setattr(self, dataset, self.Dataset(dataset_file, dim, embedding_file,
-                                                        train=self.train if dataset != "train" else None,
-                                                        shuffle_batches=dataset == "train",
-                                                        add_bow_eow=add_bow_eow,
-                                                        max_sentences=max_sentences))
+                with zip_file.open(f"{os.path.splitext(path)[0]}_{dataset}.txt", "r") as dataset_file, open(f"{directory}/{dataset}_words_embedded.txt", "r", encoding="utf-8") as embedding_file:
+                    setattr(self, dataset, self.Dataset(dataset_file, dim, embedding_file,
+                                                    train=self.train if dataset != "train" else None,
+                                                    shuffle_batches=dataset == "train",
+                                                    add_bow_eow=add_bow_eow,
+                                                    max_sentences=max_sentences))
 
         for tag in range(self.TAGS):
             self.TAG_SIZES[tag] = len(self.train.data[self.Dataset.TAGS_BEGIN + tag].words)
 
-            everything = [t for sentence in self.train.data[self.Dataset.TAGS_BEGIN + tag].word_ids for t in sentence]
+            everything = [t for sentence in self.train.data[self.Dataset.TAGS_BEGIN + tag].word_ids for t in sentence if t != 0]
             counter = Counter(everything)
             for t in range(1, self.TAG_SIZES[tag]):
-                if counter[t] == 0: 
-                    print(t)
-                    print(self.train.data[self.Dataset.TAGS_BEGIN + tag].words)
-                    raise ValueError('A very specific bad thing happened.')
+                assert counter[t] > 0
             self.TAG_RATIOS[tag] = np.array([counter[t] / len(everything) for t in range(1, self.TAG_SIZES[tag])])

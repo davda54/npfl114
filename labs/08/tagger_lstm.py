@@ -4,7 +4,6 @@ import re
 import numpy as np
 import tensorflow as tf
 
-from morpho_analyzer import MorphoAnalyzer
 from morpho_dataset import MorphoDataset
 from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda, concatenate, Conv1D, GlobalMaxPool1D
 
@@ -172,7 +171,29 @@ if __name__ == "__main__":
 
     # Load the data. Using analyses is only optional.
     morpho = MorphoDataset("czech_pdt")
-    analyses = MorphoAnalyzer("czech_pdt_analyses")
+    tags = sorted(morpho.train.data[morpho.train.TAGS].words)
+
+    forms = {tag[:2]: list(tag) for tag in tags if tag not in ["<unk>", "<pad>"]}
+    for tag in tags:
+        if tag in ["<unk>", "<pad>"]: continue
+
+        p = tag[:2]
+        form = forms[p]
+        for i, c in enumerate(tag):
+            if form[i] == c: continue
+            if c == '-' or form[i] == '-': form[i] = '*'; continue
+            form[i] = 'X'
+        forms[p] = form
+
+    with open("tags.txt", "w", encoding="utf-8") as out_file:
+        for form in sorted(forms.values()):
+            print(''.join(form[:12] + [form[14]]), file=out_file)
+        print(file=out_file)
+        for tag in tags:
+            if tag in ["<unk>", "<pad>"]: continue
+            print(tag[:12] + tag[14], file=out_file)
+
+    exit()
 
     # Create the network and train
     network = Network(args,

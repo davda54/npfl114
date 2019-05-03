@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from morpho_positional_analyzer import MorphoAnalyzer
-from morpho_positional_embedded_dataset import MorphoDataset
+from attention_dataset import MorphoDataset
 from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda, concatenate, Conv1D, GlobalMaxPool1D, SpatialDropout1D, add
 from tensorflow.keras.layers.experimental import LayerNormalization
 
@@ -16,7 +16,7 @@ tf.config.threading.set_intra_op_parallelism_threads(4)
 
 
 def log_train_progress(epoch, loss, accuracy, progress, out_file):
-    if progress < 100:
+    if progress is not None:
         print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.4f} │ acc: {accuracy:2.3f} % ║ done: {progress} %', end='', flush=True)
     else:
         print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.4f} │ acc: {accuracy:2.3f} % ║ ', end='', flush=True)
@@ -29,17 +29,17 @@ def log_dev_progress(loss, pos_accuracy, real_accuracy, learning_rate, out_file)
 
 
 class Network:
-    def __init__(self, args, num_words, num_chars):
+    def __init__(self, args, num_chars):
         self.best_accuracy = 0.0
         self.not_improved_epochs = 0
         self.learning_rate = args.learning_rate
 
-        self.build(args, num_words, num_chars)
+        self.build(args, num_chars)
         self._optimizer = tf.optimizers.Adam()
         self._loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
         self._metrics = {"loss": tf.metrics.Mean(), "accuracy": tf.metrics.SparseCategoricalAccuracy(), "real accuracy": tf.metrics.Mean()}
 
-    def build(self, args, num_words, num_chars):
+    def build(self, args, num_chars):
         self.scale = tf.constant(math.sqrt(args.attention_dim / args.heads))
 
         word_embeddings = tf.keras.Input(shape=[None, MorphoDataset.Dataset.EMBEDDING_SIZE], dtype=tf.float32)
@@ -121,8 +121,11 @@ class Network:
 
     @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None, 256], dtype=tf.float32)] + [tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 2 + [tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)], [tf.TensorSpec(shape=[None, None], dtype=tf.int32)]*MorphoDataset.TAGS])
     def train_batch(self, inputs, input_tags):
-        mask = tf.not_equal(input_tags[0], 0)
-        tags = [tag - tf.cast(mask, tf.int32) for tag in input_tags]
+        masks, tags = [], []
+        for input_tag in input_tags:
+            mask = tf.not_equal(input_tag, 0)
+            masks.append(mask)
+            tags.append(input_tag - tf.cast(mask, tf.int32))
 
         with tf.GradientTape() as tape:
             probabilities = self.model(inputs, training=True)
@@ -131,7 +134,7 @@ class Network:
             for tag in range(MorphoDataset.TAGS):
                 #gold = tf.one_hot(tags[tag], MorphoDataset.TAG_SIZES[tag]-1)
                 gold = tags[tag]
-                loss += self._loss(gold, probabilities[tag], mask)
+                loss += self._loss(gold, probabilities[tag], masks[tag])
 
         gradients = tape.gradient(loss, self.model.variables)
         if args.clip_gradient is not None:
@@ -140,7 +143,7 @@ class Network:
 
         self._metrics["loss"](loss / MorphoDataset.TAGS)
         for tag in range(MorphoDataset.TAGS):
-            self._metrics["accuracy"].update_state(tags[tag], probabilities[tag], mask)
+            self._metrics["accuracy"].update_state(tags[tag], probabilities[tag], masks[tag])
 
     def train_epoch(self, epoch, dataset, log_file, args):
         if self.not_improved_epochs > 3:
@@ -160,12 +163,15 @@ class Network:
 
             if i % 10 == 0:
                 log_train_progress(epoch, self._metrics["loss"].result(), 100 * self._metrics["accuracy"].result(), int(i / batches_num * 100), log_file)
-        log_train_progress(epoch, self._metrics["loss"].result(), 100 * self._metrics["accuracy"].result(), 100, log_file)
+        log_train_progress(epoch, self._metrics["loss"].result(), 100 * self._metrics["accuracy"].result(), None, log_file)
 
     @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None, 256], dtype=tf.float32)] + [tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 2 + [tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)], [tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * MorphoDataset.TAGS])
     def evaluate_batch(self, inputs, input_tags):
-        mask = tf.not_equal(input_tags[0], 0)
-        tags = [tag - tf.cast(mask, tf.int32) for tag in input_tags]
+        masks, tags = [], []
+        for input_tag in input_tags:
+            mask = tf.not_equal(input_tag, 0)
+            masks.append(mask)
+            tags.append(input_tag - tf.cast(mask, tf.int32))
 
         probabilities = self.model(inputs, training=False)
 
@@ -173,17 +179,18 @@ class Network:
         for tag in range(MorphoDataset.TAGS):
             #gold = tf.one_hot(tags[tag], MorphoDataset.TAG_SIZES[tag]-1)
             gold = tags[tag]
-            loss += self._loss(gold, probabilities[tag], mask)
-            self._metrics["accuracy"].update_state(tags[tag], probabilities[tag], mask)
+            loss += self._loss(gold, probabilities[tag], masks[tag])
+            self._metrics["accuracy"].update_state(tags[tag], probabilities[tag], masks[tag])
         self._metrics["loss"](loss / MorphoDataset.TAGS)
 
-        correct = mask
+        correct = masks[0]
         for tag in range(MorphoDataset.TAGS):
             tag_correct = tf.equal(tags[tag], tf.argmax(probabilities[tag], axis=-1, output_type=tf.int32))
+            tag_correct = tf.math.logical_or(tag_correct, tf.math.logical_not(masks[tag]))
             correct = tf.math.logical_and(correct, tag_correct)
         correct = tf.cast(correct, tf.float32)
 
-        accuracy = tf.reduce_sum(correct, axis=-1) / tf.reduce_sum(tf.cast(mask, tf.float32), axis=-1)
+        accuracy = tf.reduce_sum(correct, axis=-1) / tf.reduce_sum(tf.cast(masks[0], tf.float32), axis=-1)
         self._metrics["real accuracy"](tf.reduce_mean(accuracy))
 
     def evaluate_analyzed_batch(self, inputs, input_tags, dataset, analyses):
@@ -269,15 +276,12 @@ if __name__ == "__main__":
     parser.add_argument("--attention_dim", default=128, type=int, help="RNN cell dimension.")
     parser.add_argument("--heads", default=8, type=int, help="RNN cell dimension.")
     parser.add_argument("--we_dim", default=128, type=int, help="Word embedding dimension.")
-    parser.add_argument("--directory", default=".", type=str, help="Directory for the outputs.")
+    parser.add_argument("--base_directory", default=".", type=str, help="Directory for the outputs.")
     parser.add_argument("--checkpoint", default=None, type=str, help="Checkpoint of a model to load weights from.")
-   
     args = parser.parse_args()
 
-
-    architecture = ",".join(
-        ("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items()) if key not in ["directory", "epochs", "batch_size", "clip_gradient", "checkpoint"]))
-    args.directory = f"{args.directory}/models/attention_{architecture}"
+    architecture = ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items()) if key not in ["directory", "epochs", "batch_size", "clip_gradient", "checkpoint"]))
+    args.directory = f"{args.base_directory}/models/attention_{architecture}"
     if not os.path.exists(args.directory):
         os.makedirs(args.directory)
 
@@ -286,20 +290,18 @@ if __name__ == "__main__":
     tf.random.set_seed(42)
 
     # Load the data. Using analyses is only optional.
-    morpho = MorphoDataset("czech_pdt_divided", args.attention_dim)
-    analyses = MorphoAnalyzer("czech_pdt_analyses", morpho.train)
+    morpho = MorphoDataset(args.base_directory, "czech_pdt_sem_divided", args.attention_dim)
+    print(morpho.TAG_RATIOS)
+    #analyses = MorphoAnalyzer("czech_pdt_analyses", morpho.train)
 
     # Create the network and train
-    network = Network(args,
-                      num_words=len(morpho.train.data[morpho.train.FORMS].words),
-                      num_chars=len(morpho.train.data[morpho.train.FORMS].alphabet))
+    network = Network(args, num_chars=len(morpho.train.data[morpho.train.FORMS].alphabet))
     if args.checkpoint is not None:
         network.model.load_weights(f"{args.directory}/{args.checkpoint}")
         network.learning_rate = 0.003
 
     for epoch in range(args.epochs):
         with open(f"{args.directory}/log.txt", "a", encoding="utf-8") as log_file:
-            network.evaluate(morpho.dev, log_file, args)
             network.train_epoch(epoch, morpho.train, log_file, args)
             network.evaluate(morpho.dev, log_file, args)
 
