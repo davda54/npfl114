@@ -25,7 +25,7 @@ from collections import Counter
 #       to the dataset alphabet.
 class MorphoDataset:
     _URL = "https://ufal.mff.cuni.cz/~straka/courses/npfl114/1819/datasets/"
-    TAGS = 11
+    TAGS = 13
     TAG_SIZES = [0] * TAGS
     TAG_RATIOS = [[]] * TAGS
 
@@ -61,8 +61,8 @@ class MorphoDataset:
         FORMS = 0
         LEMMAS = 1
         TAGS_BEGIN = 2
-        TAGS_END = 13
-        FACTORS = 13
+        TAGS_END = 15
+        FACTORS = 15
         EMBEDDING_SIZE = 256
 
         def __init__(self, data_file, dim, embedding_file, train=None, shuffle_batches=True, add_bow_eow=False, max_sentences=None, seed=42):
@@ -151,26 +151,28 @@ class MorphoDataset:
         def size(self):
             return self._size
 
-        def batches(self, size=None):
+        def batches(self, size, max_length):
             permutation = self._shuffler.permutation(self._size) if self._shuffler else np.arange(self._size)
             while len(permutation):
-                batch_size = min(size or np.inf, len(permutation))
+                batch_size = min(size, len(permutation))
                 batch_perm = permutation[:batch_size]
                 permutation = permutation[batch_size:]
 
                 batch = []
-                max_sentence_len = max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm)
+                max_sentence_len = min(max_length, max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm))
 
                 batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32), np.zeros([batch_size, max_sentence_len, self.EMBEDDING_SIZE], np.float32)))
                 for i in range(batch_size):
-                    batch[0].word_embeddings[i, :len(self._data[self.FORMS].word_embeddings[batch_perm[i]]),:] = self._data[self.FORMS].word_embeddings[batch_perm[i]]
-                    batch[0].word_ids[i, :len(self._data[self.FORMS].word_ids[batch_perm[i]])] = self._data[self.FORMS].word_ids[batch_perm[i]]
+                    length = min(max_sentence_len, len(self._data[self.FORMS].word_embeddings[batch_perm[i]]))
+                    batch[0].word_embeddings[i, :length,:] = self._data[self.FORMS].word_embeddings[batch_perm[i]][:length]
+                    batch[0].word_ids[i, :length] = self._data[self.FORMS].word_ids[batch_perm[i]][:length]
                                         
                 # Word-level data
                 for factor in self._data[1:]:
                     batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32), None))
                     for i in range(batch_size):
-                        batch[-1].word_ids[i, :len(factor.word_ids[batch_perm[i]])] = factor.word_ids[batch_perm[i]]
+                        length = min(max_sentence_len, len(factor.word_ids[batch_perm[i]]))
+                        batch[-1].word_ids[i, :length] = factor.word_ids[batch_perm[i]][:length]
 
                 # Character-level data
                 for f, factor in enumerate(self._data):
@@ -181,6 +183,7 @@ class MorphoDataset:
                     charseqs = [factor.charseqs[factor.PAD]]
                     for i in range(batch_size):
                         for j, charseq_id in enumerate(factor.charseq_ids[batch_perm[i]]):
+                            if j >= max_sentence_len: break
                             if charseq_id not in charseqs_map:
                                 charseqs_map[charseq_id] = len(charseqs)
                                 charseqs.append(factor.charseqs[charseq_id])

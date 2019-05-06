@@ -7,7 +7,7 @@
 
 
 
-prefix = 'czech_pdt_'
+prefix = 'czech_pdt3_'
 suffix = '.txt'
 inputs = ['train', 'dev']
 
@@ -56,13 +56,14 @@ for input in inputs:
                     out_file.write(line)
                     continue
 
+                parts[2] = parts[2][:-1]
                 POS = parts[2][:2]
-                line = parts[:2] + [POS] + list(parts[2])[2:-1]
+                line = parts + list(parts[2])
                 del line[-4:-1]
                 form = forms[POS]
                 for i,c in enumerate(form):
                     if i < 2: continue
-                    if c == '-': line[1 + i] = '<pad>'
+                    if c == '-': line[3 + i] = '<pad>'
                 parts = intersperse(line, '\t')
                 out_file.write(''.join([ch for part in parts for ch in part]) + '\n')
 
@@ -74,6 +75,6 @@ with open(prefix+"test"+suffix, 'r', encoding="utf-8") as in_file:
             if len(parts) == 1:
                 out_file.write(line)
                 continue
-            parts = intersperse(parts[:2] + list('<pad>'*12), '\t')
+            parts = intersperse(parts[:2] + list('<pad>'*14), '\t')
             out_file.write(''.join([ch for part in parts for ch in part]) + '\n')
 
