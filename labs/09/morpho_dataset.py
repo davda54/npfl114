@@ -123,7 +123,7 @@ class MorphoDataset:
         def size(self):
             return self._size
 
-        def batches(self, size=None):
+        def batches(self, size, max_length):
             permutation = self._shuffler.permutation(self._size) if self._shuffler else np.arange(self._size)
             while len(permutation):
                 batch_size = min(size or np.inf, len(permutation))
@@ -131,13 +131,14 @@ class MorphoDataset:
                 permutation = permutation[batch_size:]
 
                 batch = []
-                max_sentence_len = max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm)
+                max_sentence_len = min(max_length, max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm))
 
                 # Word-level data
                 for factor in self._data:
                     batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32)))
                     for i in range(batch_size):
-                        batch[-1].word_ids[i, :len(factor.word_ids[batch_perm[i]])] = factor.word_ids[batch_perm[i]]
+                        length = min(max_sentence_len, len(factor.word_ids[batch_perm[i]]))
+                        batch[-1].word_ids[i, :length] = factor.word_ids[batch_perm[i]][:length]
 
                 # Character-level data
                 for f, factor in enumerate(self._data):
@@ -148,6 +149,7 @@ class MorphoDataset:
                     charseqs = [factor.charseqs[factor.PAD]]
                     for i in range(batch_size):
                         for j, charseq_id in enumerate(factor.charseq_ids[batch_perm[i]]):
+                            if j >= max_sentence_len: break
                             if charseq_id not in charseqs_map:
                                 charseqs_map[charseq_id] = len(charseqs)
                                 charseqs.append(factor.charseqs[charseq_id])
@@ -161,13 +163,13 @@ class MorphoDataset:
                 yield batch
 
 
-    def __init__(self, dataset, add_bow_eow=False, max_sentences=None):
+    def __init__(self, dataset, directory, add_bow_eow=False, max_sentences=None):
         path = "{}.zip".format(dataset)
-        if not os.path.exists(path):
+        if not os.path.exists(f"{directory}/{path}"):
             print("Downloading dataset {}...".format(dataset), file=sys.stderr)
             urllib.request.urlretrieve("{}/{}".format(self._URL, path), filename=path)
 
-        with zipfile.ZipFile(path, "r") as zip_file:
+        with zipfile.ZipFile(f"{directory}/{path}", "r") as zip_file:
             for dataset in ["train", "dev", "test"]:
                 with zip_file.open("{}_{}.txt".format(os.path.splitext(path)[0], dataset), "r") as dataset_file:
                     setattr(self, dataset, self.Dataset(dataset_file,
