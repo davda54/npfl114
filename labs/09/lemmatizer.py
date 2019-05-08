@@ -42,10 +42,22 @@ class Network:
 
         self._model = Model()
 
-        self._optimizer = tf.optimizers.Adam(learning_rate=args.learning_rate)
+        self._best_accuracy = 0.0
+        self._steps = 0
+        self._learning_rate = args.learning_rate
+
+        self._optimizer = tf.optimizers.Adam(learning_rate=self._learning_rate)
         self._loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
         self._metrics_training = {"loss": tf.metrics.Mean(), "accuracy": tf.metrics.SparseCategoricalAccuracy()}
         self._metrics_evaluation = {"loss": tf.metrics.Mean(), "accuracy": tf.metrics.Mean()}
+
+    def lr_decay(self):
+        self._steps += 1
+
+        if self._steps < 2000: self._learning_rate = args.rnn_dim ** (-0.5) * self._steps * 2000 ** (-1.5) * args.learning_rate
+        else: self._learning_rate = args.rnn_dim ** (-0.5) * self._steps ** (-0.5) * args.learning_rate
+
+        self._optimizer.learning_rate = self._learning_rate
 
     def _append_eow(self, sequences):
         """Append EOW character after end every given sequence."""
@@ -125,6 +137,7 @@ class Network:
         batches_num = dataset.size() / args.batch_size
 
         for b, batch in enumerate(dataset.batches(args.batch_size, args.max_length)):
+            self.lr_decay()
             predictions = self.train_batch(batch[dataset.FORMS].charseq_ids, batch[dataset.FORMS].charseqs, batch[dataset.LEMMAS].charseq_ids, batch[dataset.LEMMAS].charseqs)
 
             form, gold_lemma, system_lemma = "", "", ""
@@ -221,23 +234,26 @@ class Network:
                                 batch[dataset.LEMMAS].charseq_ids, batch[dataset.LEMMAS].charseqs)
 
         accuracy = 100*float(self._metrics_evaluation["accuracy"].result())
-        log_dev(accuracy, args.learning_rate, log_file)
+        log_dev(accuracy, self._learning_rate, log_file)
+
+        if accuracy > self._best_accuracy:
+            self._model.save_weights(f"{args.directory}/acc-{accuracy:2.3f}.h5")
+            self._best_accuracy = accuracy
 
 
 if __name__ == "__main__":
     import argparse
-    import datetime
     import os
     import re
 
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_directory", default=".", type=str, help="Directory for the outputs.")
-    parser.add_argument("--batch_size", default=256, type=int, help="Batch size.")
+    parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
     parser.add_argument("--cle_dim", default=64, type=int, help="CLE embedding dimension.")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs.")
     parser.add_argument("--max_length", default=60, type=int, help="Max length of sentence in training.")
-    parser.add_argument("--learning_rate", default=0.001, type=float, help="Initial learning rate.")
+    parser.add_argument("--learning_rate", default=1.0, type=float, help="Initial learning rate.")
     parser.add_argument("--rnn_dim", default=64, type=int, help="RNN cell dimension.")
     args = parser.parse_args()
 

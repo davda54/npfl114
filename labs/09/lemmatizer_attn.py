@@ -1,4 +1,4 @@
-0#!/usr/bin/env python3
+#!/usr/bin/env python3
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Embedding, Bidirectional, GRU, GRUCell, Dense

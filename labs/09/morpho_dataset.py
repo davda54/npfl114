@@ -36,6 +36,7 @@ class MorphoDataset:
             self.words = train.words if train else ["<pad>", "<unk>"]
             self.word_ids = []
             self.word_strings = []
+            self.word_embeddings = []
             self.characters = characters
             if characters:
                 self.alphabet_map = train.alphabet_map if train else {
@@ -46,8 +47,9 @@ class MorphoDataset:
                 self.charseq_ids = []
 
     class FactorBatch:
-        def __init__(self, word_ids, charseq_ids=None, charseqs=None):
+        def __init__(self, word_ids, word_embeddings=None, charseq_ids=None, charseqs=None):
             self.word_ids = word_ids
+            self.word_embeddings = word_embeddings
             self.charseq_ids = charseq_ids
             self.charseqs = charseqs
 
@@ -56,9 +58,22 @@ class MorphoDataset:
         LEMMAS = 1
         TAGS = 2
         FACTORS = 3
+        EMBEDDING_SIZE = 256
 
-        def __init__(self, data_file, train=None, shuffle_batches=True, add_bow_eow=False, max_sentences=None, seed=42):
+        def __init__(self, data_file, embedding_file, train=None, shuffle_batches=True, add_bow_eow=False, max_sentences=None, seed=42):
             # Create factors
+            if embedding_file:
+                n = 0
+                mean_embedding = np.zeros((self.EMBEDDING_SIZE), dtype=np.float32)
+                words_embedding_map = {}
+                for word_embedding in embedding_file:
+                    n += 1
+                    tokens = word_embedding.split(' ')
+                    embedding = np.array(tokens[1:-1], dtype=np.float32)
+                    mean_embedding += embedding
+                    words_embedding_map[tokens[0]] = embedding
+                mean_embedding /= n
+
             self._data = []
             for f in range(self.FACTORS):
                 self._data.append(MorphoDataset.Factor(f in [self.FORMS, self.LEMMAS], train._data[f] if train else None))
@@ -74,6 +89,7 @@ class MorphoDataset:
                             if len(factor.word_ids): factor.word_ids[-1] = np.array(factor.word_ids[-1], np.int32)
                             factor.word_ids.append([])
                             factor.word_strings.append([])
+                            if embedding_file and f == self.FORMS: factor.word_embeddings.append([])
                             if factor.characters: factor.charseq_ids.append([])
 
                         word = columns[f]
@@ -106,6 +122,9 @@ class MorphoDataset:
                                 factor.words_map[word] = len(factor.words)
                                 factor.words.append(word)
                         factor.word_ids[-1].append(factor.words_map[word])
+                        if f == self.FORMS and embedding_file:
+                            lower_word = word.lower()
+                            factor.word_embeddings[-1].append(words_embedding_map[lower_word] if lower_word in words_embedding_map else mean_embedding)
 
                     in_sentence = True
                 else:
@@ -133,8 +152,13 @@ class MorphoDataset:
                 batch = []
                 max_sentence_len = min(max_length, max(len(self._data[self.FORMS].word_ids[i]) for i in batch_perm))
 
+                batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32), np.zeros([batch_size, max_sentence_len, self.EMBEDDING_SIZE], np.float32)))
+                for i in range(batch_size):
+                    length = min(max_sentence_len, len(self._data[self.FORMS].word_embeddings[batch_perm[i]]))
+                    batch[0].word_embeddings[i, :length, :] = self._data[self.FORMS].word_embeddings[batch_perm[i]][:length]
+                    batch[0].word_ids[i, :length] = self._data[self.FORMS].word_ids[batch_perm[i]][:length]
                 # Word-level data
-                for factor in self._data:
+                for factor in self._data[1:]:
                     batch.append(MorphoDataset.FactorBatch(np.zeros([batch_size, max_sentence_len], np.int32)))
                     for i in range(batch_size):
                         length = min(max_sentence_len, len(factor.word_ids[batch_perm[i]]))
@@ -171,8 +195,8 @@ class MorphoDataset:
 
         with zipfile.ZipFile(f"{directory}/{path}", "r") as zip_file:
             for dataset in ["train", "dev", "test"]:
-                with zip_file.open("{}_{}.txt".format(os.path.splitext(path)[0], dataset), "r") as dataset_file:
-                    setattr(self, dataset, self.Dataset(dataset_file,
+                with zip_file.open("{}_{}.txt".format(os.path.splitext(path)[0], dataset), "r") as dataset_file, open(f"{directory}/{dataset}_words_embedded.txt", "r", encoding="utf-8") as embedding_file:
+                    setattr(self, dataset, self.Dataset(dataset_file, embedding_file,
                                                         train=self.train if dataset != "train" else None,
                                                         shuffle_batches=dataset == "train",
                                                         add_bow_eow=add_bow_eow,
