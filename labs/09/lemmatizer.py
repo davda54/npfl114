@@ -73,7 +73,6 @@ class Network:
             source_embeddings = self._model.source_embeddings(source_charseqs)
             source_encoded = self._model.source_rnn(source_embeddings)
 
-            # Copy the source_encoded to corresponding batch places, and then flatten it
             source_mask = tf.not_equal(source_charseq_ids, 0)
             source_encoded = tf.boolean_mask(tf.gather(source_encoded, source_charseq_ids), source_mask)
             targets = tf.boolean_mask(tf.gather(target_charseqs, target_charseq_ids), source_mask)

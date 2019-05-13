@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from morpho_positional_analyzer import MorphoAnalyzer
-from attention_dataset import MorphoDataset
+from attention_dataset2 import MorphoDataset
 from tensorflow.keras.layers import LSTM, GRU, Bidirectional, Embedding, Dense, Lambda, concatenate, Conv1D, GlobalMaxPool1D, SpatialDropout1D, add, Dropout
 from tensorflow.keras.layers.experimental import LayerNormalization
 
@@ -262,6 +262,15 @@ class Network:
         if self._metrics["accuracy"].result() > 0.975:
             accuracy = self._metrics["accuracy"].result()
             self.model.save_weights(f"{args.directory}/acc-{100 * accuracy:2.3f}.h5")
+
+    @tf.function(input_signature=[[tf.TensorSpec(shape=[None, None, 256], dtype=tf.float32)] + [
+        tf.TensorSpec(shape=[None, None], dtype=tf.int32)] * 2 + [
+                                      tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)]])
+    def predict_batch(self, inputs):
+        probabilities = self.model(inputs, training=False)
+        return np.argmax(probabilities, axis=2)
+
+    def predict(self, input):
 
 if __name__ == "__main__":
     import argparse
