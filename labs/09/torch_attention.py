@@ -201,14 +201,15 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, num_chars, dimension, heads, layers, dropout, max_pos_len):
+    def __init__(self, num_chars, dimension, heads, layers, dropout, duz, max_pos_len):
         super(Decoder, self).__init__()
 
         self.scale = float(math.sqrt(dimension))
 
         self.embedding = nn.Embedding(num_chars, dimension, padding_idx=MorphoDataset.Factor.PAD)
         self.dropout = nn.Dropout(dropout)
-        self.char_dropout = nn.Dropout2d(dropout)
+        self.char_dropout = nn.Dropout2d(duz)
+        self.word_dropout = nn.Dropout2d(duz)
 
         self.decoding = nn.ModuleList([DecoderLayer(dimension, heads, dropout, max_pos_len) for _ in range(layers)])
 
@@ -217,6 +218,7 @@ class Decoder(nn.Module):
         x = self.dropout(x)
 
         char_encoder_output = self.char_dropout(char_encoder_output.unsqueeze(0)).squeeze_(0)
+        word_encoder_output = self.word_dropout(word_encoder_output)
 
         for decoding in self.decoding:
             x = decoding(char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths)
@@ -226,6 +228,8 @@ class Decoder(nn.Module):
 class WordEmbedding(nn.Module):
     def __init__(self, args, num_source_chars):
         super().__init__()
+
+        self.word_dropout = nn.Dropout2d(args.duz)
 
         self.dim = args.dim
         self.embedding = nn.Embedding(num_source_chars, args.dim, padding_idx=MorphoDataset.Factor.PAD)
@@ -248,6 +252,8 @@ class WordEmbedding(nn.Module):
         self.combined_relu = nn.ReLU()
 
     def forward(self, chars, word_embeddings, char_mask):
+        word_embeddings = self.word_dropout(word_embeddings)
+
         sentences, words, char_len = chars.size()
         char_embedding = self.embedding(chars)
         char_embedding_flat = char_embedding.view(-1, char_len, self.dim).transpose(-2, -1)
@@ -272,7 +278,7 @@ class Model(nn.Module):
         self._input_embedding = WordEmbedding(args, num_source_chars)
         self._encoder = Encoder(args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
         self._encoder_sentence = Encoder(args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
-        self._decoder = Decoder(num_target_chars, args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
+        self._decoder = Decoder(num_target_chars, args.dim, args.heads, args.layers, args.dropout, args.duz, args.max_pos_len)
         self._classifier = nn.Linear(args.dim, num_target_chars)
         self._tag_classifier = nn.Linear(args.dim, num_target_tags)
 
@@ -301,9 +307,7 @@ class Model(nn.Module):
         encoder_mask = self._create_padding_mask(sources[source_mask])
 
         sentence_lenghts = (source_word_ids != 0).sum(dim=1)
-        #sentences = torch.repeat_interleave(source_words, sentence_lenghts, dim=0)
         encoder_sentence_mask = self._create_padding_mask(source_word_ids)
-        #encoder_sentence_mask = torch.repeat_interleave(encoder_sentence_mask, sentence_lenghts, dim=0)
 
         return sources.cuda(), source_mask.cuda(), targets.cuda(), source_words.cuda(), encoder_mask.cuda(), encoder_sentence_mask.cuda(), sentence_lenghts.cuda(), target_tags.cuda()
 
@@ -313,19 +317,21 @@ class Model(nn.Module):
 
         decoder_combined_mask = self._create_look_ahead_mask(targets_in)
 
-        sources, embedded_chars, embedded_words = self._input_embedding(sources, sentences, source_mask)
+        _, embedded_chars, embedded_words = self._input_embedding(sources, sentences, source_mask)
         encoded_chars = self._encoder(embedded_chars, char_encoder_mask)
 
         encoded_words = self._encoder_sentence(embedded_words, word_encoder_mask)
-        prediction_tags = self._tag_classifier(encoded_words)
+        prediction_tags = self._tag_classifier(encoded_words)[target_tags != MorphoDataset.Factor.PAD, :]
+        target_tags = target_tags[target_tags != MorphoDataset.Factor.PAD]
 
         encoded_words = torch.repeat_interleave(encoded_words, sentence_lengths, dim=0)
         word_encoder_mask = torch.repeat_interleave(word_encoder_mask, sentence_lengths, dim=0)
 
         decoded_chars = self._decoder(encoded_chars, encoded_words, targets_in, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)
-        prediction_seqs = self._classifier(decoded_chars)
+        prediction_lemmas = self._classifier(decoded_chars)[targets_out != MorphoDataset.Factor.PAD]
+        targets_out = targets_out[targets_out != MorphoDataset.Factor.PAD]
 
-        return prediction_seqs, prediction_tags[target_tags != 0, :], sources, targets_out, target_tags[target_tags != 0]
+        return prediction_lemmas, prediction_tags, targets_out, target_tags
 
     def predict(self, batch, dataset):
         sources, source_mask, targets, sentences, char_encoder_mask, word_encoder_mask, sentence_lengths, target_tags = self._gather_batch(batch, dataset)
@@ -335,6 +341,9 @@ class Model(nn.Module):
         encoded_chars = self._encoder(embedded_chars, char_encoder_mask)
 
         encoded_words = self._encoder_sentence(embedded_words, word_encoder_mask)
+        prediction_tags = self._tag_classifier(encoded_words)[target_tags != MorphoDataset.Factor.PAD, :]
+        target_tags = target_tags[target_tags != MorphoDataset.Factor.PAD]
+
         encoded_words = torch.repeat_interleave(encoded_words, sentence_lengths, dim=0)
         word_encoder_mask = torch.repeat_interleave(word_encoder_mask, sentence_lengths, dim=0)
 
@@ -354,12 +363,12 @@ class Model(nn.Module):
 
             if finished.all(): break
 
-        return output[:, 1:], sources, targets, sentence_lengths
+        return output[:, 1:], prediction_tags, sources, targets, target_tags, sentence_lengths
 
     def predict_to_list(self, batch, dataset):
         sentences = []
 
-        predictions, _, _, sentence_lengths = self.predict(batch, dataset)
+        predictions, _, _, _, _, sentence_lengths = self.predict(batch, dataset)
         predictions = predictions.cpu()
 
         index = 0
