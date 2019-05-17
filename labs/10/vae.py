@@ -17,6 +17,16 @@ class Network:
         # - generate two outputs z_mean and z_log_variance, each passing the result
         #   of the above line through its own dense layer with args.z_dim units
 
+        encoder_input = tf.keras.Input(shape=[MNIST.H, MNIST.W, MNIST.C], dtype=tf.float32)
+        encoder = tf.keras.layers.Flatten()(encoder_input)
+        for i in range(len(args.encoder_layers)):
+            encoder = tf.keras.layers.Dense(args.encoder_layers[i], activation='relu')(encoder)
+        z_mean = tf.keras.layers.Dense(args.z_dim)(encoder)
+        z_log_variance = tf.keras.layers.Dense(args.z_dim)(encoder)
+
+        self.encoder = tf.keras.Model(inputs=encoder_input, outputs=[z_mean, z_log_variance])
+
+
         # TODO: Define `self.decoder` as a Model, which
         # - takes vectors of [args.z_dim] shape on input
         # - applies len(args.decoder_layers) dense layers with ReLU activation,
@@ -24,6 +34,15 @@ class Network:
         # - applies output dense layer with MNIST.H * MNIST.W * MNIST.C units
         #   and a suitable output activation
         # - reshapes the output (tf.keras.layers.Reshape) to [MNIST.H, MNIST.W, MNISt.C]
+
+        decoder_input = decoder = tf.keras.Input(shape=[args.z_dim], dtype=tf.float32)
+        for i in range(len(args.decoder_layers)):
+            decoder = tf.keras.layers.Dense(args.decoder_layers[i], activation='relu')(decoder)
+        decoder = tf.keras.layers.Dense(MNIST.H * MNIST.W * MNIST.C, activation='sigmoid')(decoder)
+        decoder = tf.keras.layers.Reshape((MNIST.H, MNIST.W, MNIST.C))(decoder)
+
+        self.decoder = tf.keras.Model(inputs=decoder_input, outputs=decoder)
+
 
         self._optimizer = tf.optimizers.Adam()
         self._reconstruction_loss_fn = tf.losses.BinaryCrossentropy()
@@ -39,20 +58,30 @@ class Network:
     def train_batch(self, images):
         with tf.GradientTape() as tape:
             # TODO: Compute z_mean and z_log_variance of given images using `self.encoder`; do not forget about `training=True`.
+            z_mean, z_log_variance = self.encoder(images, training=True)
+            z_stddev = tf.math.exp(z_log_variance / 2)
 
             # TODO: Sample `z` from a Normal distribution with mean `z_mean` and variance `exp(z_log_variance)`.
             # Use `tf.random.normal` and **pass argument `seed=42`**.
+            z = z_mean + z_stddev * tf.random.normal(shape=z_mean.shape, mean=0, stddev=1, seed=42)
 
             # TODO: Decode images using `z`.
+            decoded_images = self.decoder(z, training=True)
 
             # TODO: Define `reconstruction_loss` using self._reconstruction_loss_fn
             # TODO: Define `latent_loss` as a mean of KL divergences of suitable distributions.
             # TODO: Define `loss` as a weighted sum of the reconstruction_loss (weighted by the number
             # of pixels in one image) and the latent_loss (weighted by self._z_dim). Note that
             # the `loss` should be weighted sum, not weighted average.
-            pass
+            reconstruction_loss = self._reconstruction_loss_fn(images, decoded_images)
+            latent_loss = tf.reduce_mean(self._kl_divergence(a_mean=z_mean, a_sd=z_stddev, b_mean=0, b_sd=1))
+            loss = (MNIST.H * MNIST.W) * reconstruction_loss + self._z_dim * latent_loss
+
         # TODO: Compute gradients with respect to trainable variables of the encoder and the decoder.
         # TODO: Apply the gradients to encoder and decoder trainable variables (in one update).
+        variables = self.encoder.trainable_variables + self.decoder.trainable_variables
+        gradients = tape.gradient(loss, variables)
+        self._optimizer.apply_gradients(zip(gradients, variables))
 
         tf.summary.experimental.set_step(self._optimizer.iterations)
         with self._writer.as_default():
@@ -107,14 +136,14 @@ if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
+    parser.add_argument("--batch_size", default=128, type=int, help="Batch size.")
     parser.add_argument("--dataset", default="mnist", type=str, help="MNIST-like dataset to use.")
     parser.add_argument("--decoder_layers", default="500,500", type=str, help="Decoder layers.")
     parser.add_argument("--encoder_layers", default="500,500", type=str, help="Encoder layers.")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs.")
     parser.add_argument("--recodex", default=False, action="store_true", help="Evaluation in ReCodEx.")
-    parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
-    parser.add_argument("--z_dim", default=100, type=int, help="Dimension of Z.")
+    parser.add_argument("--threads", default=8, type=int, help="Maximum number of threads to use.")
+    parser.add_argument("--z_dim", default=2, type=int, help="Dimension of Z.")
     args = parser.parse_args()
     args.decoder_layers = [int(decoder_layer) for decoder_layer in args.decoder_layers.split(",")]
     args.encoder_layers = [int(encoder_layer) for encoder_layer in args.encoder_layers.split(",")]
