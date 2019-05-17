@@ -118,7 +118,7 @@ class EncoderLayer(nn.Module):
 
         self.attention = UniformAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_1 = nn.Dropout(dropout)
-        self.layer_norm_1 = nn.LayerNorm(dimension)
+        self.batch_norm_1 = nn.BatchNorm1d(dimension)
 
         self.nonlinear_sublayer = nn.Sequential(
             nn.Linear(dimension, 4*dimension),
@@ -126,15 +126,15 @@ class EncoderLayer(nn.Module):
             nn.Linear(4*dimension, dimension),
             nn.Dropout(dropout)
         )
-        self.layer_norm_2 = nn.LayerNorm(dimension)
+        self.batch_norm_2 = nn.BatchNorm1d(dimension)
 
     def forward(self, x, mask):
         attention = self.attention(x, mask)
-        attention = self.dropout_1(attention)
-        x = self.layer_norm_1(attention + x)
+        x = x + self.dropout_1(attention)
+        x = self.batch_norm_1(x.transpose(1, 2)).transpose(1, 2)
 
-        nonlinear = self.nonlinear_sublayer(x)
-        return self.layer_norm_2(nonlinear + x)
+        x = x + self.nonlinear_sublayer(x)
+        return self.batch_norm_2(x.transpose(1, 2)).transpose(1, 2)
 
 
 class DecoderLayer(nn.Module):
@@ -147,15 +147,15 @@ class DecoderLayer(nn.Module):
 
         self.attention_1 = UniformAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_1 = nn.Dropout(dropout)
-        self.layer_norm_1 = nn.LayerNorm(dimension)
+        self.batch_norm_1 = nn.BatchNorm1d(dimension)
 
         self.attention_2 = DividedAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_2 = nn.Dropout(dropout)
-        self.layer_norm_2 = nn.LayerNorm(dimension)
+        self.batch_norm_2 = nn.BatchNorm1d(dimension)
 
         self.attention_3 = DividedAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_3 = nn.Dropout(dropout)
-        self.layer_norm_3 = nn.LayerNorm(dimension)
+        self.batch_norm_3 = nn.BatchNorm1d(dimension)
 
         self.nonlinear_sublayer = nn.Sequential(
             nn.Linear(dimension, 4*dimension),
@@ -163,23 +163,23 @@ class DecoderLayer(nn.Module):
             nn.Linear(4*dimension, dimension),
             nn.Dropout(dropout)
         )
-        self.layer_norm_4 = nn.LayerNorm(dimension)
+        self.batch_norm_4 = nn.BatchNorm1d(dimension)
 
-    def forward(self, char_encoder_output, word_encoder_output, self_input, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
-        attention = self.attention_1(self_input, look_ahead_mask)
-        attention = self.dropout_1(attention)
-        x = self.layer_norm_1(attention + self_input)
+    def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
+        attention = self.attention_1(x, look_ahead_mask)
+        x = x + self.dropout_1(attention)
+        x = self.batch_norm_1(x.transpose(1,2)).transpose(1,2)
 
         attention = self.attention_2(x, char_encoder_output, char_encoder_output, char_padding_mask)
-        attention = self.dropout_2(attention)
-        x = self.layer_norm_2(attention + x)
+        x = x + self.dropout_2(attention)
+        x = self.batch_norm_2(x.transpose(1,2)).transpose(1,2)
 
         attention = self.attention_3(x, word_encoder_output, word_encoder_output, word_padding_mask, sentence_lengths)
-        attention = self.dropout_3(attention)
-        x = self.layer_norm_3(attention + x)
+        x = x + self.dropout_3(attention)
+        x = self.batch_norm_3(x.transpose(1, 2)).transpose(1, 2)
 
-        nonlinear = self.nonlinear_sublayer(x)
-        return self.layer_norm_3(nonlinear + x)
+        x = x + self.nonlinear_sublayer(x)
+        return self.batch_norm_4(x.transpose(1, 2)).transpose(1, 2)
 
 
 class Encoder(nn.Module):

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -13,12 +14,16 @@ def log_train_progress(epoch, loss, accuracy, accuracy_tags, learning_rate, prog
     print('\r' + 140 * ' ', end='')  # clear line
     d, r = progress // 5, progress % 5
     loading_bar = d*'█' + (('░' if r < 2 else '▒' if r < 4 else '▓') + max(0, 19 - d)*'░' if progress < 100 else '')
-    print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.4f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % │ lr: {learning_rate:1.6f} ║ {loading_bar} {progress:2d} %', end='', flush=True)
+    print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.6f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % │ lr: {learning_rate:1.6f} ║ {loading_bar} {progress:2d} %', end='', flush=True)
 
 def log_train(epoch, loss, accuracy, accuracy_tags, out_file):
     print('\r' + 140 * ' ', end='')  # clear line
-    print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.4f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % ║ ', end='', flush=True)
-    print(f'epoch: {epoch:3d} ║ train loss: {loss:1.4f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % ║ ', end='', flush=True, file=out_file)
+    print(f'\repoch: {epoch:3d} ║ train loss: {loss:1.6f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % ║ ', end='', flush=True)
+    print(f'epoch: {epoch:3d} ║ train loss: {loss:1.6f} │ acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % ║ ', end='', flush=True, file=out_file)
+
+def log_skipped_dev(out_file):
+    print(flush=True)
+    print(flush=True, file=out_file)
 
 def log_dev(accuracy, accuracy_tags, learning_rate, out_file):
     print(f'dev acc lemma: {accuracy:2.3f} % │ tag: {accuracy_tags:2.3f} % ║ lr: {learning_rate:1.6f}', flush=True)
@@ -50,14 +55,14 @@ class LRDecay:
         self.dim = args.dim
         self.base_learning_rate = args.learning_rate
         self.warmup = args.warmup_steps
-        self.step = 0
+        self.step = int(math.ceil(90828 / args.batch_size) * 86)
 
     def __call__(self):
         self.step += 1
         if self.step < self.warmup:
             learning_rate = self.dim ** (-0.5) * self.step * self.warmup ** (-1.5) * self.base_learning_rate
         else:
-            learning_rate = self.dim ** (-0.5) * self.step ** (-0.5) * self.base_learning_rate
+            learning_rate = 0.5*self.dim ** (-0.5) * self.step ** (-0.5) * self.base_learning_rate
 
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = learning_rate
@@ -105,20 +110,22 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_directory", default=".", type=str, help="Directory for the outputs.")
-    parser.add_argument("--batch_size", default=256, type=int, help="Batch size.")
-    parser.add_argument("--dim", default=4, type=int, help="Dimension of hidden layers.")
-    parser.add_argument("--heads", default=2, type=int, help="Number of attention heads.")
-    parser.add_argument("--layers", default=1, type=int, help="Number of attention layers.")
-    parser.add_argument("--dropout", default=0.1, type=float, help="Dropout rate.")
+    parser.add_argument("--evaluate_each", default=5, type=int, help="After how many epoch do we want to evaluate.")
+    parser.add_argument("--batch_size", default=28, type=int, help="Batch size.")
+    parser.add_argument("--dim", default=256, type=int, help="Dimension of hidden layers.")
+    parser.add_argument("--heads", default=8, type=int, help="Number of attention heads.")
+    parser.add_argument("--layers", default=4, type=int, help="Number of attention layers.")
+    parser.add_argument("--dropout", default=0.2, type=float, help="Dropout rate.")
     parser.add_argument("--duz", default=0.1, type=float, help="Davsonův Ultimátní Zapomínák rate.")
-    parser.add_argument("--cle_layers", default=1, type=int, help="CLE embedding layers.")
-    parser.add_argument("--cnn_filters", default=2, type=int, help="CNN embedding filters per length.")
-    parser.add_argument("--cnn_max_width", default=3, type=int, help="Maximum CNN filter width.")
-    parser.add_argument("--max_length", default=10, type=int, help="Max length of sentence in training.")
-    parser.add_argument("--max_pos_len", default=4, type=int, help="Maximal length of the relative positional representation.")
+    parser.add_argument("--cle_layers", default=3, type=int, help="CLE embedding layers.")
+    parser.add_argument("--cnn_filters", default=96, type=int, help="CNN embedding filters per length.")
+    parser.add_argument("--cnn_max_width", default=5, type=int, help="Maximum CNN filter width.")
+    parser.add_argument("--max_length", default=60, type=int, help="Max length of sentence in training.")
+    parser.add_argument("--max_pos_len", default=8, type=int, help="Maximal length of the relative positional representation.")
     parser.add_argument("--label_smoothing", default=0.1, type=float, help="Label smoothing of the cross-entropy loss.")
     parser.add_argument("--learning_rate", default=1.0, type=float, help="Initial learning rate multiplier.")
     parser.add_argument("--warmup_steps", default=4000, type=int, help="Learning rate warmup.")
+    parser.add_argument("--checkpoint", default='checkpoint_acc-98.671', type=str, help="Checkpoint path.")
     args = parser.parse_args()
 
     architecture = ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items()) if key not in ["directory", "base_directory", "epochs", "batch_size", "clip_gradient", "checkpoint"]))
@@ -140,15 +147,19 @@ if __name__ == "__main__":
     num_tags = len(morpho.train.data[morpho.train.TAGS].words)
 
     network = Model(args, num_source_chars, num_target_chars, num_tags).cuda()
-
-    criterion1 = nn.CrossEntropyLoss(ignore_index=MorphoDataset.Factor.PAD)
-    criterion2 = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(network.parameters())
     lr_decay = LRDecay(optimizer, args)
 
-    best_accuracy = 0.0
-
-    for epoch in count():
+    if args.checkpoint is not None:
+        state = torch.load(f"{args.directory}/{args.checkpoint}")
+        optimizer.load_state_dict(state['optimizer'])
+        network.load_state_dict(state['state_dict'])
+        initial_epoch = state['epoch'] + 1
+    else:
+        initial_epoch = 0
+        
+    
+    for epoch in count(initial_epoch):
         with open(f"{args.directory}/log.txt", "a", encoding="utf-8") as log_file:
 
             #
@@ -187,7 +198,6 @@ if __name__ == "__main__":
                     correct += truth_mask.sum().item()
                     total_images += truth_mask.size(0)
                     running_loss += loss.item() * truth_mask.size(0)
-
                     if b % 1 == 0:
                         log_train_progress(epoch, running_loss / total_images, correct / total_images * 100, correct_tags / total_words * 100, learning_rate, int(b / batches_num * 100))
             log_train(epoch, running_loss / total_images, correct / total_images * 100, correct_tags / total_words * 100, log_file)
@@ -197,11 +207,15 @@ if __name__ == "__main__":
             # EVALUATE EPOCH
             #
 
+            if epoch % args.evaluate_each != 0:
+               log_skipped_dev(log_file)
+               continue
+
             network.eval()
             data = morpho.dev
-            total_images, correct, mistakes = 0, 0.0, []
+            total_lemmas, correct, correct_tags, total_words, mistakes = 0, 0.0, 0.0, 0, []
             with torch.no_grad():
-                for b, batch in enumerate(data.batches(1024, 1000)):
+                for b, batch in enumerate(data.batches(128, 1000)):
                     pred_lemmas, pred_tags, sources, target_lemmas, target_tags, _ = network.predict(batch, data)
                     pred_lemmas, sources, target_lemmas, target_tags = pred_lemmas.cpu(), sources.cpu(), target_lemmas[:, 1:].cpu(), target_tags.cpu()
 
@@ -214,25 +228,22 @@ if __name__ == "__main__":
                     resized_predictions = torch.cat((pred_lemmas, torch.zeros_like(target_lemmas)), dim=1)[:, :target_lemmas.size(1)]
                     truth_mask = (resized_predictions * mask == target_lemmas * mask).all(dim=1)
 
-                    total_images += target_lemmas.size(0)
+                    total_lemmas += target_lemmas.size(0)
                     correct += truth_mask.sum().item()
 
                     if len(mistakes) < 2500:
                         mistakes += get_mistakes(truth_mask, data, sources, pred_lemmas, target_lemmas)
 
                 tag_accuracy = correct_tags / total_words * 100
-                lemma_accuracy = correct / total_images * 100
+                lemma_accuracy = correct / total_lemmas * 100
                 log_dev(lemma_accuracy, tag_accuracy, learning_rate, log_file)
 
                 with open(f"{args.directory}/mistakes_{epoch:03d}.txt", "w", encoding="utf-8") as mistakes_file:
                     log_mistakes(mistakes, mistakes_file)
 
-                if lemma_accuracy > best_accuracy:
-                    best_accuracy = lemma_accuracy
-
-                    state = {
-                        'epoch': epoch,
-                        'state_dict': network.state_dict(),
-                        'optimizer': optimizer.state_dict()
-                    }
-                    torch.save(state, f'{args.directory}/checkpoint_acc-{lemma_accuracy:2.3f}')
+                state = {
+                    'epoch': epoch,
+                    'state_dict': network.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                }
+                torch.save(state, f'{args.directory}/checkpoint_acc-{lemma_accuracy:2.3f}')

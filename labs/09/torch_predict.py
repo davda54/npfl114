@@ -13,18 +13,22 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--base_directory", default=".", type=str, help="Directory for the outputs.")
-    parser.add_argument("--dim", default=128, type=int, help="Dimension of hidden layers.")
+    parser.add_argument("--evaluate_each", default=5, type=int, help="After how many epoch do we want to evaluate.")
+    parser.add_argument("--batch_size", default=128, type=int, help="Batch size.")
+    parser.add_argument("--dim", default=256, type=int, help="Dimension of hidden layers.")
     parser.add_argument("--heads", default=8, type=int, help="Number of attention heads.")
-    parser.add_argument("--layers", default=3, type=int, help="Number of attention layers.")
-    parser.add_argument("--dropout", default=0.1, type=float, help="Dropout rate.")
-    parser.add_argument("--cle_layers", default=2, type=int, help="CLE embedding layers.")
-    parser.add_argument("--cnn_filters", default=64, type=int, help="CNN embedding filters per length.")
+    parser.add_argument("--layers", default=4, type=int, help="Number of attention layers.")
+    parser.add_argument("--dropout", default=0.2, type=float, help="Dropout rate.")
+    parser.add_argument("--duz", default=0.1, type=float, help="Davsonův Ultimátní Zapomínák rate.")
+    parser.add_argument("--cle_layers", default=3, type=int, help="CLE embedding layers.")
+    parser.add_argument("--cnn_filters", default=96, type=int, help="CNN embedding filters per length.")
     parser.add_argument("--cnn_max_width", default=5, type=int, help="Maximum CNN filter width.")
     parser.add_argument("--max_length", default=60, type=int, help="Max length of sentence in training.")
     parser.add_argument("--max_pos_len", default=8, type=int, help="Maximal length of the relative positional representation.")
+    parser.add_argument("--label_smoothing", default=0.1, type=float, help="Label smoothing of the cross-entropy loss.")
     parser.add_argument("--learning_rate", default=1.0, type=float, help="Initial learning rate multiplier.")
     parser.add_argument("--warmup_steps", default=4000, type=int, help="Learning rate warmup.")
-    parser.add_argument("--checkpoint", default="checkpoint_acc-97.92")
+    parser.add_argument("--checkpoint", default='checkpoint_acc-98.677', type=str, help="Checkpoint path.")
     args = parser.parse_args()
 
     architecture = ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items()) if key not in ["directory", "base_directory", "epochs", "batch_size", "clip_gradient", "checkpoint"]))
@@ -42,7 +46,7 @@ if __name__ == "__main__":
 
     network = Model(args, num_source_chars, num_target_chars, num_target_tags).cuda()
 
-    state = torch.load(f"{args.checkpoint}")
+    state = torch.load(f"{args.base_directory}/{args.checkpoint}")
     network.load_state_dict(state['state_dict'])
 
 
@@ -56,9 +60,9 @@ if __name__ == "__main__":
     with torch.no_grad():
         sentences = []
         size = data.size()
-        for b, batch in enumerate(data.batches(96, 1000)):
+        for b, batch in enumerate(data.batches(args.batch_size, 1000)):
             sentences += network.predict_to_list(batch, data)
-            print(f"{b / (size / 96) * 100:3.2f} %")
+            print(f"{b / (size / args.batch_size) * 100:3.2f} %")
 
     print("INFERED")
 
