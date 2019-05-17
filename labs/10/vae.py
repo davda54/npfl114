@@ -41,16 +41,18 @@ class Network:
             # TODO: Compute z_mean and z_log_variance of given images using `self.encoder`; do not forget about `training=True`.
 
             # TODO: Sample `z` from a Normal distribution with mean `z_mean` and variance `exp(z_log_variance)`.
+            # Use `tf.random.normal` and **pass argument `seed=42`**.
 
             # TODO: Decode images using `z`.
 
             # TODO: Define `reconstruction_loss` using self._reconstruction_loss_fn
             # TODO: Define `latent_loss` as a mean of KL divergences of suitable distributions.
             # TODO: Define `loss` as a weighted sum of the reconstruction_loss (weighted by the number
-            # of pixels in one image) and the latent_loss (weighted by self._z_dim).
+            # of pixels in one image) and the latent_loss (weighted by self._z_dim). Note that
+            # the `loss` should be weighted sum, not weighted average.
             pass
         # TODO: Compute gradients with respect to trainable variables of the encoder and the decoder.
-        # TODO: Apply the gradients to encoder and decoder trainable variables.
+        # TODO: Apply the gradients to encoder and decoder trainable variables (in one update).
 
         tf.summary.experimental.set_step(self._optimizer.iterations)
         with self._writer.as_default():

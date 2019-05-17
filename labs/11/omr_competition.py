@@ -2,21 +2,22 @@
 import numpy as np
 import tensorflow as tf
 
-from nli_dataset import NLIDataset
+from omr_dataset import OMRDataset
 
 class Network:
-    def __init__(self, nli, args):
+    def __init__(self, omr, args):
         # TODO: Define a suitable model.
 
         self._writer = tf.summary.create_file_writer(args.logdir, flush_millis=10 * 1000)
 
-    def train(self, nli, args):
+    def train(self, omr, args):
         # TODO: Train the network on a given dataset.
         raise NotImplementedError()
 
     def predict(self, dataset, args):
-        # TODO: Predict method should return a list/np.ndaddar, each element
-        # being the predicted language for a sencence.
+        # TODO: Predict method should return a list, each element corresponding
+        # to one test image. Each element should be a list/np.ndarray
+        # containing indices recognized marks (without padding).
         raise NotImplementedError()
 
 
@@ -47,16 +48,16 @@ if __name__ == "__main__":
     ))
 
     # Load the data
-    nli = NLIDataset()
+    omr = OMRDataset()
 
     # Create the network and train
-    network = Network(nli, args)
-    network.train(nli, args)
+    network = Network(omr, args)
+    network.train(omr, args)
 
-    # Generate test set annotations, but in args.logdir to allow parallel execution.
-    out_path = "nli_competition_test.txt"
+    # Generate test set annotations, but to allow parallel execution, create it
+    # in in args.logdir if it exists.
+    out_path = "omr_competition_test.txt"
     if os.path.isdir(args.logdir): out_path = os.path.join(args.logdir, out_path)
     with open(out_path, "w", encoding="utf-8") as out_file:
-        languages = network.predict(nli.test, args)
-        for language in languages:
-            print(nli.test.vocabulary("languages")[language], file=out_file)
+        for sequence in network.predict(omr.test, args):
+            print(" ".join(omr.MARKS[mark] for mark in sequence), file=out_file)

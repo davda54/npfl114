@@ -11,7 +11,7 @@ class Network:
 
         # TODO: Define `self.generator` as a Model, which
         # - takes vectors of [args.z_dim] shape on input
-        # - applies batch normalized dense layer with 1024 units and ReLU (do not forget about `use_bias=False` anywhere in the model)
+        # - applies batch normalized dense layer with 1024 units and ReLU (do not forget about `use_bias=False` in suitable places)
         # - applies batch normalized dense layer with MNIST.H // 4 * MNIST.W // 4 * 64 units and ReLU
         # - reshapes the current hidder output to [MNIST.H // 4, MNIST.W // 4, 64]
         # - applies batch normalized transposed convolution with 32 filters, kernel size 5,
@@ -22,10 +22,10 @@ class Network:
         # TODO: Define `self.discriminator` as a Model, which
         # - takes input images with shape [MNIST.H, MNIST.W, MNIST.C]
         # - computes batch normalized convolution with 32 filters, kernel size 5,
-        #   same padding, and ReLU activation (do not forget `use_bias` anywhere in the model)
+        #   same padding, and ReLU activation (do not forget `use_bias=False` where appropriate)
         # - max-pools with kernel size 2 and stride 2
         # - computes batch normalized convolution with 64 filters, kernel size 5,
-        #   same padding, and ReLU activation (do not forget `use_bias` anywhere in the model)
+        #   same padding, and ReLU activation
         # - max-pools with kernel size 2 and stride 2
         # - flattens the current representation
         # - applies batch normalized dense layer with 1024 uints and ReLU activation
@@ -38,13 +38,14 @@ class Network:
 
     def _sample_z(self, batch_size):
         """Sample random latent variable."""
-        return tf.random.uniform([batch_size, self._z_dim], -1, 1)
+        return tf.random.uniform([batch_size, self._z_dim], -1, 1, seed=42)
 
     @tf.function
     def train_batch(self, images):
         # TODO(gan): Generator training. Using a Gradient tape:
-        # - generate random images using a `generator`; do not forget about `training=True`
-        # - run discriminator on the generated images
+        # - generate random images using a `generator`; do not forget about `training=True` where appropriate
+        # - run discriminator on the generated images, also using `training=True` (even if
+        #   not updating discriminator parameters, we want to perform possible BatchNorm in it)
         # - compute loss using `_loss_fn`, with target labels `tf.ones_like(discriminator_output)`
         # Then, compute the gradients with respect to generator trainable variables and update
         # generator trainable weights using self._generator_optimizer.
@@ -52,8 +53,9 @@ class Network:
         # TODO(gan): Discriminator training. Using a Gradient tape:
         # - discriminate `images`, storing results in `discriminated_real`
         # - discriminate images generated in generator training, storing results in `discriminated_fake`
-        # - compute loss by using `_loss_fn` on both discriminated_real and discriminated_fake, with
-        #   suitable target labels (`tf.zeros_like` and `tf.ones_like` come handy).
+        # - compute loss by summing
+        #   - `_loss_fn` on discriminated_real with suitable target labes
+        #   - `_loss_fn` on discriminated_fake with suitable targets (`tf.{ones,zeros}_like` come handy).
         # Then, compute the gradients with respect to discriminator trainable variables and update
         # discriminator trainable weights using self._discriminator_optimizer.
 
@@ -105,15 +107,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", default=50, type=int, help="Batch size.")
     parser.add_argument("--dataset", default="mnist", type=str, help="MNIST-like dataset to use.")
-    parser.add_argument("--discriminator_layers", default="128", type=str, help="Discriminator layers.")
     parser.add_argument("--epochs", default=100, type=int, help="Number of epochs.")
-    parser.add_argument("--generator_layers", default="128", type=str, help="Generator layers.")
     parser.add_argument("--recodex", default=False, action="store_true", help="Evaluation in ReCodEx.")
     parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
     parser.add_argument("--z_dim", default=100, type=int, help="Dimension of Z.")
     args = parser.parse_args()
-    args.discriminator_layers = [int(discriminator_layer) for discriminator_layer in args.discriminator_layers.split(",")]
-    args.generator_layers = [int(generator_layer) for generator_layer in args.generator_layers.split(",")]
 
     # Fix random seeds
     np.random.seed(42)
