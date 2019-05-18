@@ -132,6 +132,28 @@ class DividedAttentionSublayer(nn.Module):
         return self.output_transform(heads_concat)
 
 
+class DenseSublayer(nn.Module):
+    def __init__(self, dimension, dropout):
+        super(DenseSublayer, self).__init__()
+
+        self.linear_1 = nn.Linear(dimension, 4*dimension)
+        self.relu = nn.ReLU()
+        self.linear_2 = nn.Linear(4*dimension, dimension)
+        self.dropout = nn.Dropout(dropout)
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_normal_(self.linear_1.weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.linear_1.bias)
+        nn.init.xavier_normal_(self.linear_2.weight, gain=1)
+        nn.init.zeros_(self.linear_2.bias)
+
+    def forward(self, x, mask):
+        x = self.relu(self.linear_1(x))
+        return self.dropout(self.linear_2(x))
+
+
 class EncoderLayer(nn.Module):
     def __init__(self, dimension, heads, dropout, max_pos_len):
         super(EncoderLayer, self).__init__()
@@ -140,27 +162,14 @@ class EncoderLayer(nn.Module):
         self.dropout_1 = nn.Dropout(dropout)
         self.layer_norm_1 = nn.LayerNorm(dimension)
 
-        self.nonlinear_sublayer = nn.Sequential(
-            nn.Linear(dimension, 4*dimension),
-            nn.ReLU(),
-            nn.Linear(4*dimension, dimension),
-            nn.Dropout(dropout)
-        )
+        self.dense_sublayer = DenseSublayer(dimension, dropout)
         self.layer_norm_2 = nn.LayerNorm(dimension)
-
-        self.init_weights()
-
-    def init_weights(self):
-        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[0].weight, gain=nn.init.calculate_gain('relu'))
-        nn.init.zeros_(self.nonlinear_sublayer.modules()[0].bias)
-        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[2].weight, gain=1)
-        nn.init.zeros_(self.nonlinear_sublayer.modules()[2].bias)
 
     def forward(self, x, mask):
         attention = self.attention(x, mask)
         x = self.layer_norm_1(x + self.dropout_1(attention))
 
-        return self.layer_norm_2(x + self.nonlinear_sublayer(x))
+        return self.layer_norm_2(x + self.dense_sublayer(x))
 
 
 class DecoderLayer(nn.Module):
@@ -183,21 +192,8 @@ class DecoderLayer(nn.Module):
         self.dropout_3 = nn.Dropout(dropout)
         self.layer_norm_3 = nn.LayerNorm(dimension)
 
-        self.nonlinear_sublayer = nn.Sequential(
-            nn.Linear(dimension, 4*dimension),
-            nn.ReLU(),
-            nn.Linear(4*dimension, dimension),
-            nn.Dropout(dropout)
-        )
+        self.dense_sublayer = DenseSublayer(dimension, dropout)
         self.layer_norm_4 = nn.LayerNorm(dimension)
-
-        self.init_weights()
-
-    def init_weights(self):
-        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[0].weight, gain=nn.init.calculate_gain('relu'))
-        nn.init.zeros_(self.nonlinear_sublayer.modules()[0].bias)
-        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[2].weight, gain=1)
-        nn.init.zeros_(self.nonlinear_sublayer.modules()[2].bias)
 
     def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
         attention = self.attention_1(x, look_ahead_mask)
@@ -209,7 +205,7 @@ class DecoderLayer(nn.Module):
         attention = self.attention_3(x, word_encoder_output, word_encoder_output, word_padding_mask, sentence_lengths)
         x = self.layer_norm_3(x + self.dropout_3(attention))
 
-        return self.layer_norm_4(x + self.nonlinear_sublayer(x))
+        return self.layer_norm_4(x + self.dense_sublayer(x))
 
 
 class Encoder(nn.Module):
