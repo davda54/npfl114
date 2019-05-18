@@ -85,6 +85,8 @@ class DividedAttentionSublayer(nn.Module):
         self.softmax = nn.Softmax(dim=3)
         self.output_transform = nn.Linear(dimension, dimension)
 
+        self.init_weights()
+
     def init_weights(self):
         nn.init.normal_(self.input_transform_q.weight, mean=0, std=np.sqrt(2.0 / (self.dimension + self.dimension // self.heads)))
         nn.init.zeros_(self.input_transform_q.bias)
@@ -146,6 +148,14 @@ class EncoderLayer(nn.Module):
         )
         self.layer_norm_2 = nn.LayerNorm(dimension)
 
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.nonlinear_sublayer.modules()[0].bias)
+        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[2].weight, gain=1)
+        nn.init.zeros_(self.nonlinear_sublayer.modules()[2].bias)
+
     def forward(self, x, mask):
         attention = self.attention(x, mask)
         x = self.layer_norm_1(x + self.dropout_1(attention))
@@ -180,6 +190,14 @@ class DecoderLayer(nn.Module):
             nn.Dropout(dropout)
         )
         self.layer_norm_4 = nn.LayerNorm(dimension)
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.nonlinear_sublayer.modules()[0].bias)
+        nn.init.xavier_normal_(self.nonlinear_sublayer.modules()[2].weight, gain=1)
+        nn.init.zeros_(self.nonlinear_sublayer.modules()[2].bias)
 
     def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
         attention = self.attention_1(x, look_ahead_mask)
@@ -226,7 +244,12 @@ class Decoder(nn.Module):
         self.decoding = nn.ModuleList([DecoderLayer(dimension, heads, dropout, max_pos_len) for _ in range(layers)])
 
         self.classifier = nn.Linear(dimension, num_chars)
-        self.classifier.weight = self.embedding.weight # tie weights
+        #self.classifier.weight = self.embedding.weight # tie weights
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_normal_(self.classifier.weight)
+        nn.init.zeros_(self.classifier.bias)
 
     def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
         x = self.embedding(x) * self.scale
@@ -267,6 +290,14 @@ class WordEmbedding(nn.Module):
         self.combined_linear = nn.Linear(args.dim + MorphoDataset.Dataset.EMBEDDING_SIZE, args.dim)
         self.combined_relu = nn.ReLU()
 
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.kaiming_normal_(self.conv_linear.weight, nonlinearity='relu')
+        nn.init.zeros_(self.conv_linear.bias)
+        nn.init.kaiming_normal_(self.combined_linear.weight, nonlinearity='relu')
+        nn.init.zeros_(self.combined_linear.bias)
+
     def forward(self, chars, word_embeddings, char_mask):
         word_embeddings = self.word_dropout(word_embeddings)
 
@@ -296,6 +327,12 @@ class Model(nn.Module):
         self._encoder_sentence = Encoder(args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
         self._decoder = Decoder(num_target_chars, args.dim, args.heads, args.layers, args.dropout, args.duz, args.max_pos_len)
         self._tag_classifier = nn.Linear(args.dim, num_target_tags)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.xavier_normal_(self._tag_classifier.weight)
+        nn.init.zeros_(self._tag_classifier.bias)
 
     def _create_look_ahead_mask(self, target):
         look_ahead = torch.ones(target.size(1), target.size(1), device='cuda', dtype=torch.uint8).triu(1)
@@ -339,7 +376,9 @@ class Model(nn.Module):
         prediction_tags = self._tag_classifier(encoded_words)[target_tags != MorphoDataset.Factor.PAD, :]
         target_tags = target_tags[target_tags != MorphoDataset.Factor.PAD]
 
-        encoded_words = torch.repeat_interleave(encoded_words, sentence_lengths, dim=0)
+        hooked_encoded_words = 1.0*encoded_words
+        hooked_encoded_words.register_hook(lambda g: g / (sentence_lengths.float().sqrt().view(-1,1,1) + 1e-9))
+        encoded_words = torch.repeat_interleave(hooked_encoded_words, sentence_lengths, dim=0)
         word_encoder_mask = torch.repeat_interleave(word_encoder_mask, sentence_lengths, dim=0)
 
         prediction_lemmas = self._decoder(encoded_chars, encoded_words, targets_in, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)

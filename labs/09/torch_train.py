@@ -50,12 +50,12 @@ def smooth_loss(pred, gold, smoothing):
 
 
 class LRDecay:
-    def __init__(self, optimizer, args):
-        self.optimizer = optimizer
+    def __init__(self, optimizers, args, initial_step=0):
+        self.optimizers = optimizers
         self.dim = args.dim
         self.base_learning_rate = args.learning_rate
         self.warmup = args.warmup_steps
-        self.step = int(math.ceil(90828 / args.batch_size) * 86)
+        self.step = initial_step
 
     def __call__(self):
         self.step += 1
@@ -64,8 +64,9 @@ class LRDecay:
         else:
             learning_rate = 0.5*self.dim ** (-0.5) * self.step ** (-0.5) * self.base_learning_rate
 
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = learning_rate
+        for optimizer in self.optimizers:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = learning_rate
 
         return learning_rate
 
@@ -123,9 +124,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_length", default=60, type=int, help="Max length of sentence in training.")
     parser.add_argument("--max_pos_len", default=8, type=int, help="Maximal length of the relative positional representation.")
     parser.add_argument("--label_smoothing", default=0.1, type=float, help="Label smoothing of the cross-entropy loss.")
-    parser.add_argument("--learning_rate", default=1.0, type=float, help="Initial learning rate multiplier.")
+    parser.add_argument("--learning_rate", default=2.0, type=float, help="Initial learning rate multiplier.")
     parser.add_argument("--warmup_steps", default=4000, type=int, help="Learning rate warmup.")
-    parser.add_argument("--checkpoint", default='checkpoint_acc-98.671', type=str, help="Checkpoint path.")
+    parser.add_argument("--checkpoint", default=None, type=str, help="Checkpoint path.")
     args = parser.parse_args()
 
     architecture = ",".join(("{}={}".format(re.sub("(.)[^_]*_?", r"\1", key), value) for key, value in sorted(vars(args).items()) if key not in ["directory", "base_directory", "epochs", "batch_size", "clip_gradient", "checkpoint"]))
@@ -147,17 +148,21 @@ if __name__ == "__main__":
     num_tags = len(morpho.train.data[morpho.train.TAGS].words)
 
     network = Model(args, num_source_chars, num_target_chars, num_tags).cuda()
-    optimizer = torch.optim.SparseAdam(network.parameters())
-    lr_decay = LRDecay(optimizer, args)
+
+    sparse_optimizer = torch.optim.SparseAdam([param for name, param in network.named_parameters() if name.split('.')[1] == 'embedding'])
+    dense_optimizer = torch.optim.Adam([param for name, param in network.named_parameters() if name.split('.')[1] != 'embedding'])
 
     if args.checkpoint is not None:
         state = torch.load(f"{args.directory}/{args.checkpoint}")
-        optimizer.load_state_dict(state['optimizer'])
+        sparse_optimizer.load_state_dict(state['sparse_optimizer'])
+        dense_optimizer.load_state_dict(state['dense_optimizer'])
         network.load_state_dict(state['state_dict'])
         initial_epoch = state['epoch'] + 1
     else:
         initial_epoch = 0
-        
+
+    lr_decay = LRDecay([sparse_optimizer, dense_optimizer], args, int(math.ceil(morpho.train.size() / args.batch_size) * initial_epoch))
+
     
     for epoch in count(initial_epoch):
         with open(f"{args.directory}/log.txt", "a", encoding="utf-8") as log_file:
@@ -175,7 +180,9 @@ if __name__ == "__main__":
             for b, batch in enumerate(data.batches(args.batch_size, args.max_length)):
                 learning_rate = lr_decay()
 
-                optimizer.zero_grad()
+                sparse_optimizer.zero_grad()
+                dense_optimizer.zero_grad()
+
                 pred_lemmas, pred_tags, target_lemmas, target_tags = network(batch, data)
 
                 tag_loss = smooth_loss(pred_tags, target_tags, smoothing=args.label_smoothing)
@@ -183,7 +190,8 @@ if __name__ == "__main__":
 
                 loss = tag_loss + lemma_loss
                 loss.backward()
-                optimizer.step()
+                sparse_optimizer.step()
+                dense_optimizer.step()
 
                 with torch.no_grad():
                     pred_tags = torch.argmax(pred_tags.data, 1).cpu()
@@ -244,6 +252,7 @@ if __name__ == "__main__":
                 state = {
                     'epoch': epoch,
                     'state_dict': network.state_dict(),
-                    'optimizer': optimizer.state_dict()
+                    'sparse_optimizer': sparse_optimizer.state_dict(),
+                    'dense_optimizer': dense_optimizer.state_dict()
                 }
                 torch.save(state, f'{args.directory}/checkpoint_acc-{lemma_accuracy:2.3f}')
