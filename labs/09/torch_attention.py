@@ -35,6 +35,14 @@ class UniformAttentionSublayer(nn.Module):
         self.softmax = nn.Softmax(dim=3)
         self.output_transform = nn.Linear(dimension, dimension)
 
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.normal_(self.input_transform.weight, mean=0, std=np.sqrt(2.0 / (self.dimension + self.dimension // self.heads)))
+        nn.init.zeros_(self.input_transform.bias)
+        nn.init.xavier_normal_(self.output_transform.weight)
+        nn.init.zeros_(self.output_transform.bias)
+
     def forward(self, input, mask):
         batch_size, seq_len, _ = input.size()
 
@@ -77,6 +85,16 @@ class DividedAttentionSublayer(nn.Module):
         self.softmax = nn.Softmax(dim=3)
         self.output_transform = nn.Linear(dimension, dimension)
 
+    def init_weights(self):
+        nn.init.normal_(self.input_transform_q.weight, mean=0, std=np.sqrt(2.0 / (self.dimension + self.dimension // self.heads)))
+        nn.init.zeros_(self.input_transform_q.bias)
+        nn.init.normal_(self.input_transform_k.weight, mean=0, std=np.sqrt(2.0 / (self.dimension + self.dimension // self.heads)))
+        nn.init.zeros_(self.input_transform_k.bias)
+        nn.init.normal_(self.input_transform_v.weight, mean=0, std=np.sqrt(2.0 / (self.dimension + self.dimension // self.heads)))
+        nn.init.zeros_(self.input_transform_v.bias)
+        nn.init.xavier_normal_(self.output_transform.weight)
+        nn.init.zeros_(self.output_transform.bias)
+
     def _split_heads(self, x):
         x = x.view(x.size(0), -1, self.heads, self.dimension // self.heads)
         return x.permute(0, 2, 1, 3).contiguous()
@@ -118,7 +136,7 @@ class EncoderLayer(nn.Module):
 
         self.attention = UniformAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_1 = nn.Dropout(dropout)
-        self.batch_norm_1 = nn.BatchNorm1d(dimension)
+        self.layer_norm_1 = nn.LayerNorm(dimension)
 
         self.nonlinear_sublayer = nn.Sequential(
             nn.Linear(dimension, 4*dimension),
@@ -126,15 +144,13 @@ class EncoderLayer(nn.Module):
             nn.Linear(4*dimension, dimension),
             nn.Dropout(dropout)
         )
-        self.batch_norm_2 = nn.BatchNorm1d(dimension)
+        self.layer_norm_2 = nn.LayerNorm(dimension)
 
     def forward(self, x, mask):
         attention = self.attention(x, mask)
-        x = x + self.dropout_1(attention)
-        x = self.batch_norm_1(x.transpose(1, 2)).transpose(1, 2)
+        x = self.layer_norm_1(x + self.dropout_1(attention))
 
-        x = x + self.nonlinear_sublayer(x)
-        return self.batch_norm_2(x.transpose(1, 2)).transpose(1, 2)
+        return self.layer_norm_2(x + self.nonlinear_sublayer(x))
 
 
 class DecoderLayer(nn.Module):
@@ -147,15 +163,15 @@ class DecoderLayer(nn.Module):
 
         self.attention_1 = UniformAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_1 = nn.Dropout(dropout)
-        self.batch_norm_1 = nn.BatchNorm1d(dimension)
+        self.layer_norm_1 = nn.LayerNorm(dimension)
 
         self.attention_2 = DividedAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_2 = nn.Dropout(dropout)
-        self.batch_norm_2 = nn.BatchNorm1d(dimension)
+        self.layer_norm_2 = nn.LayerNorm(dimension)
 
         self.attention_3 = DividedAttentionSublayer(dimension, heads, max_pos_len)
         self.dropout_3 = nn.Dropout(dropout)
-        self.batch_norm_3 = nn.BatchNorm1d(dimension)
+        self.layer_norm_3 = nn.LayerNorm(dimension)
 
         self.nonlinear_sublayer = nn.Sequential(
             nn.Linear(dimension, 4*dimension),
@@ -163,23 +179,19 @@ class DecoderLayer(nn.Module):
             nn.Linear(4*dimension, dimension),
             nn.Dropout(dropout)
         )
-        self.batch_norm_4 = nn.BatchNorm1d(dimension)
+        self.layer_norm_4 = nn.LayerNorm(dimension)
 
     def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
         attention = self.attention_1(x, look_ahead_mask)
-        x = x + self.dropout_1(attention)
-        x = self.batch_norm_1(x.transpose(1,2)).transpose(1,2)
+        x = self.layer_norm_1(x + self.dropout_1(attention))
 
         attention = self.attention_2(x, char_encoder_output, char_encoder_output, char_padding_mask)
-        x = x + self.dropout_2(attention)
-        x = self.batch_norm_2(x.transpose(1,2)).transpose(1,2)
+        x = self.layer_norm_2(x + self.dropout_2(attention))
 
         attention = self.attention_3(x, word_encoder_output, word_encoder_output, word_padding_mask, sentence_lengths)
-        x = x + self.dropout_3(attention)
-        x = self.batch_norm_3(x.transpose(1, 2)).transpose(1, 2)
+        x = self.layer_norm_3(x + self.dropout_3(attention))
 
-        x = x + self.nonlinear_sublayer(x)
-        return self.batch_norm_4(x.transpose(1, 2)).transpose(1, 2)
+        return self.layer_norm_4(x + self.nonlinear_sublayer(x))
 
 
 class Encoder(nn.Module):
@@ -206,12 +218,15 @@ class Decoder(nn.Module):
 
         self.scale = float(math.sqrt(dimension))
 
-        self.embedding = nn.Embedding(num_chars, dimension, padding_idx=MorphoDataset.Factor.PAD)
+        self.embedding = nn.Embedding(num_chars, dimension, padding_idx=MorphoDataset.Factor.PAD, sparse=True)
         self.dropout = nn.Dropout(dropout)
         self.char_dropout = nn.Dropout2d(duz)
         self.word_dropout = nn.Dropout2d(duz)
 
         self.decoding = nn.ModuleList([DecoderLayer(dimension, heads, dropout, max_pos_len) for _ in range(layers)])
+
+        self.classifier = nn.Linear(dimension, num_chars)
+        self.classifier.weight = self.embedding.weight # tie weights
 
     def forward(self, char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths):
         x = self.embedding(x) * self.scale
@@ -222,7 +237,8 @@ class Decoder(nn.Module):
 
         for decoding in self.decoding:
             x = decoding(char_encoder_output, word_encoder_output, x, look_ahead_mask, char_padding_mask, word_padding_mask, sentence_lengths)
-        return x
+
+        return self.classifier(x)
 
 
 class WordEmbedding(nn.Module):
@@ -232,7 +248,7 @@ class WordEmbedding(nn.Module):
         self.word_dropout = nn.Dropout2d(args.duz)
 
         self.dim = args.dim
-        self.embedding = nn.Embedding(num_source_chars, args.dim, padding_idx=MorphoDataset.Factor.PAD)
+        self.embedding = nn.Embedding(num_source_chars, args.dim, padding_idx=MorphoDataset.Factor.PAD, sparse=True)
 
         convolutions = []
         for width in range(3, args.cnn_max_width + 1, 2):
@@ -279,7 +295,6 @@ class Model(nn.Module):
         self._encoder = Encoder(args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
         self._encoder_sentence = Encoder(args.dim, args.heads, args.layers, args.dropout, args.max_pos_len)
         self._decoder = Decoder(num_target_chars, args.dim, args.heads, args.layers, args.dropout, args.duz, args.max_pos_len)
-        self._classifier = nn.Linear(args.dim, num_target_chars)
         self._tag_classifier = nn.Linear(args.dim, num_target_tags)
 
     def _create_look_ahead_mask(self, target):
@@ -327,8 +342,8 @@ class Model(nn.Module):
         encoded_words = torch.repeat_interleave(encoded_words, sentence_lengths, dim=0)
         word_encoder_mask = torch.repeat_interleave(word_encoder_mask, sentence_lengths, dim=0)
 
-        decoded_chars = self._decoder(encoded_chars, encoded_words, targets_in, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)
-        prediction_lemmas = self._classifier(decoded_chars)[targets_out != MorphoDataset.Factor.PAD]
+        prediction_lemmas = self._decoder(encoded_chars, encoded_words, targets_in, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)
+        prediction_lemmas = prediction_lemmas[targets_out != MorphoDataset.Factor.PAD]
         targets_out = targets_out[targets_out != MorphoDataset.Factor.PAD]
 
         return prediction_lemmas, prediction_tags, targets_out, target_tags
@@ -352,8 +367,7 @@ class Model(nn.Module):
 
         for _ in range(maximum_iterations):
             decoder_combined_mask = self._create_look_ahead_mask(output)
-            decoded_chars = self._decoder(encoded_chars, encoded_words, output, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)
-            predictions = self._classifier(decoded_chars)
+            predictions = self._decoder(encoded_chars, encoded_words, output, decoder_combined_mask, char_encoder_mask, word_encoder_mask, sentence_lengths)
 
             next_prediction = predictions[:, -1, :]
             next_char = next_prediction.argmax(dim=-1)
@@ -366,23 +380,30 @@ class Model(nn.Module):
         return output[:, 1:], prediction_tags, sources, targets, target_tags, sentence_lengths
 
     def predict_to_list(self, batch, dataset):
-        sentences = []
-
-        predictions, _, _, _, _, sentence_lengths = self.predict(batch, dataset)
+        lemma_sentences = []
+        tag_sentences = []
+        
+        predictions, prediction_tags, _, _, _, sentence_lengths = self.predict(batch, dataset)
         predictions = predictions.cpu()
+        prediction_tags = torch.argmax(prediction_tags.data, 1).cpu()
 
         index = 0
-        for len in sentence_lengths:
+        for s, length in enumerate(sentence_lengths):
             sentence = []
-            for w in range(len.item()):
+            tags = []
+            for w in range(length.item()):
                 word = []
                 for prediction in predictions[index, :].numpy():
                     if prediction == MorphoDataset.Factor.EOW: break
                     word.append(prediction)
+                    
                 word.append(MorphoDataset.Factor.EOW)
+                tags.append(prediction_tags[index].item())
+                sentence.append(word)
 
                 index += 1
-                sentence.append(word)
-            sentences.append(sentence)
 
-        return sentences
+            lemma_sentences.append(sentence)
+            tag_sentences.append(tags)
+
+        return lemma_sentences, tag_sentences

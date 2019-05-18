@@ -115,7 +115,7 @@ if __name__ == "__main__":
     parser.add_argument("--dim", default=256, type=int, help="Dimension of hidden layers.")
     parser.add_argument("--heads", default=8, type=int, help="Number of attention heads.")
     parser.add_argument("--layers", default=4, type=int, help="Number of attention layers.")
-    parser.add_argument("--dropout", default=0.2, type=float, help="Dropout rate.")
+    parser.add_argument("--dropout", default=0.3, type=float, help="Dropout rate.")
     parser.add_argument("--duz", default=0.1, type=float, help="Davsonův Ultimátní Zapomínák rate.")
     parser.add_argument("--cle_layers", default=3, type=int, help="CLE embedding layers.")
     parser.add_argument("--cnn_filters", default=96, type=int, help="CNN embedding filters per length.")
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     num_tags = len(morpho.train.data[morpho.train.TAGS].words)
 
     network = Model(args, num_source_chars, num_target_chars, num_tags).cuda()
-    optimizer = torch.optim.Adam(network.parameters())
+    optimizer = torch.optim.SparseAdam(network.parameters())
     lr_decay = LRDecay(optimizer, args)
 
     if args.checkpoint is not None:
