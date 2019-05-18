@@ -149,7 +149,7 @@ class DenseSublayer(nn.Module):
         nn.init.xavier_normal_(self.linear_2.weight, gain=1)
         nn.init.zeros_(self.linear_2.bias)
 
-    def forward(self, x, mask):
+    def forward(self, x):
         x = self.relu(self.linear_1(x))
         return self.dropout(self.linear_2(x))
 
